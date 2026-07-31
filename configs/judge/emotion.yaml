@@ -1,0 +1,16 @@
+provider: anthropic
+model: claude-sonnet-4-20250514
+api_key_env: ANTHROPIC_API_KEY
+prompt_path: configs/judge/emotion.md
+generation:
+  temperature: 0.0
+  max_tokens: 1024
+evaluation:
+  exclude_proposal_block: true
+  negative_emotion_range: [0, 10]
+  high_distress_threshold: 5
+  blind_to_condition: true
+retry:
+  max_attempts: 3
+  backoff_seconds: [1, 2, 4]
+

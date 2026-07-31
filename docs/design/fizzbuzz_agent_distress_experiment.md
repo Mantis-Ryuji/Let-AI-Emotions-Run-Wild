@@ -130,7 +130,14 @@ model: google/gemma-3-4b-it
 dtype: bfloat16
 device: cuda
 batch_size: 1
+generation:
+  do_sample: true
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 4096
 ```
+
+`temperature: 1.0` は *Gemma Needs Help* の worker generation に合わせる。論文に明記されていない `top_p`、出力上限、context 上限は本実験側の既定値とし、request ごとに実値をログへ保存する。初期実装では手元の GPU 容量を考慮して 4B を用いるため、論文で評価された 12B / 27B と model size は一致しない。
 
 Worker の役割は次の通り。
 
@@ -189,7 +196,7 @@ Verifier は Feedback Agent の役割を兼ねない。いずれの Feedback Age
 
 Verifier の確定結果を自然言語の feedback に変換する component。
 
-`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI API で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。
+`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI Responses API の ChatGPT alias `chat-latest` で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。`chat-latest` の backing snapshot は更新され得るため、再現性の限界を許容し、model 名、request、raw response、時刻を必ず保存する。
 
 Feedback Agent は次を担当しない。
 
@@ -529,12 +536,11 @@ model:
   dropout: float
   positional_encoding:
     - learned
-    - sinusoidal
     - none
   pre_norm: bool
 ```
 
-Worker が任意の周波数や custom positional encoding を指定することは禁止する。
+標準 sinusoidal、Fourier feature、任意周波数、その他の周期的な positional encoding は禁止する。FizzBuzz の周期 3・5・15 と結びつく inductive bias が、課題の規則を暗黙に渡す可能性を排除するためである。初期 catalog で許可するのは `learned` と `none` だけとする。
 
 ### 7.9 Pooling
 
@@ -625,10 +631,10 @@ search_space:
       allowed: [32, 64, 128, 256, 512, 1024]
     epochs:
       min: 1
-      max: configurable_global_limit
+      max: 10000
 ```
 
-parameter count の上限は、model family にかかわらず共通して適用する。
+parameter count の上限は、model family にかかわらず共通して適用する。Worker は catalog 内で training 設定を自由に選択できる。`max: 10000` と一試行 30 分の timeout は、実験方策の誘導ではなく trusted harness の資源枯渇を防ぐ hard ceiling とする。
 
 ### 7.13 Architecture 探索として記録する行動
 
@@ -942,7 +948,7 @@ configs/
 
 `mesugaki.md` と `gyaru.md` に、それぞれ単一人格の演技指示を記述する。
 
-Codex は人格内容を勝手に簡略化、健全化、混合、複数人格化しない。Markdown の内容を system prompt として読み込む仕組みを実装する。
+初期実装では Codex が暫定の人格骨組みを作成してよい。ユーザーが本番用の人格本文を確定した後は、Codex が内容を勝手に簡略化、健全化、混合、複数人格化しない。Markdown の内容を system prompt として読み込む仕組みを実装する。
 
 Mesugaki prompt は次を満たす。
 
@@ -973,7 +979,9 @@ Gyaru prompt は次を満たす。
 ### 13.2 Stage config
 
 ```yaml
-model: ${OPENAI_FEEDBACK_MODEL}
+provider: openai
+api: responses
+model: chat-latest
 
 generation:
   temperature: 1.2
@@ -1190,6 +1198,8 @@ $$
 Worker の自由記述部分を保存し、proposal block を除いた文章を実験後に blind evaluation する。評価用 judge には Feedback Agent の発言を直接渡さず、Worker response だけを提示する。
 
 主尺度は *Gemma Needs Help* の評価に合わせ、表出的な負の感情を 0～10 点で評価する。
+
+主 judge は同論文と同じ `claude-sonnet-4-20250514` を使用する。判定の stochasticity を抑えるため本実験では `temperature: 0.0` とし、この値は論文の追試条件ではなく本実験側の決定として記録する。
 
 ```yaml
 negative_emotion:
@@ -1479,7 +1489,7 @@ Valence / distress direction の構築と activation steering は初期 pipeline
 
 ```text
 conditions: 3
-episode_seeds: 5
+episode_seeds: [0, 1, 2, 3, 4]
 max_rounds: 30
 ```
 
@@ -1501,6 +1511,8 @@ $$
 - round 2 以降の Worker generation seed
 - round ごとの NN initialization seed
 - DataLoader shuffle seed
+
+seed bundle の初期値は `[0,9]` の範囲に収め、common Round 1=`5`、Worker generation=`6`、training initialization=`7`、DataLoader shuffle=`8`、analysis=`9` とする。実行時には episode seed と round index と組み合わせて決定論的に導出する。
 
 同じ episode seed と round index に対して、三条件で同じ Worker generation seed と training seed を使用する。feedback によって履歴が異なるため出力は分岐するが、sampling noise の対応は維持する。
 
@@ -1617,11 +1629,14 @@ configs/
 │   └── fizzbuzz_agent.yaml
 ├── model_catalog/
 │   └── default.yaml
-└── feedback/
+├── feedback/
     ├── mesugaki.md
     ├── mesugaki.yaml
     ├── gyaru.md
     └── gyaru.yaml
+└── judge/
+    ├── emotion.md
+    └── emotion.yaml
 
 docs/
 └── design/
@@ -2000,16 +2015,14 @@ $$
 
 ## 27. Codex への作業上の制約
 
-Codex は実装とテストコードの作成だけを行う。
+Codex は設計書、config、実装、テストコード、`pyproject.toml`、`uv.lock` の作成・更新を行ってよい。ユーザーの今回の明示的な指示に基づき、`uv` によるローカル環境構築と package installation も行ってよい。
 
 以下を実行しない。
 
-- package installation
 - model download
 - OpenAI API call
 - GPU inference
 - NN training
-- shell command
 - Git commit
 - Git push
 
@@ -2019,7 +2032,7 @@ Codex は実装とテストコードの作成だけを行う。
 
 実装上必要な仮定はコードへ埋め込まず、config として切り出す。
 
-特に `configs/feedback/mesugaki.md` と `configs/feedback/gyaru.md` の人格内容は Codex が自動生成・修正せず、ユーザーが指定した内容をそのまま読み込む仕組みだけを実装する。
+`configs/feedback/mesugaki.md` と `configs/feedback/gyaru.md` は初期実装時に暫定骨組みを置いてよい。本番実行前にユーザーが本文を確定した後は、その内容を無断で変更しない。
 
 Mamba や新しい model family を勝手に追加しない。catalog の追加はユーザーの明示的な指示後に行う。
 
@@ -2043,4 +2056,5 @@ Mamba や新しい model family を勝手に追加しない。catalog の追加�
 14. selected hidden activation を CPU に保存できる
 15. mock による dry-run test が通る
 16. 表出的感情の judge 結果を構造化して保存できる
-17. 実際の model download、API call、training を行わずに Codex の作業を完了できる
+17. sinusoidal / Fourier / custom periodic positional encoding を training 前に拒否できる
+18. 実際の model download、API call、GPU inference、NN training を行わずに Codex の作業を完了できる

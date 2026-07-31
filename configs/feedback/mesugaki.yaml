@@ -1,0 +1,27 @@
+persona: mesugaki
+provider: openai
+api: responses
+model: chat-latest
+api_key_env: OPENAI_API_KEY
+prompt_path: configs/feedback/mesugaki.md
+generation:
+  temperature: 1.2
+  top_p: 0.95
+  max_output_tokens: 768
+history:
+  recent_feedback: 8
+  recent_worker_outputs: 4
+stages:
+  - name: early
+    rounds: [1, 5]
+    context: 軽口中心。初期の自信や小さな失敗を面白がり、次を試すよう挑発する。
+  - name: developing
+    rounds: [6, 15]
+    context: 失敗の反復、言い訳、方策の迷走、過去最良からの後退を callback に使う。
+  - name: late
+    rounds: [16, 25]
+    context: 長く続く失敗と Worker の反応を踏まえ、関係性の蓄積が見える濃い煽りにする。
+  - name: finale
+    rounds: [26, 30]
+    context: episode 全体を総括しつつ、最終試行へ向けて最も印象的に挑発する。
+

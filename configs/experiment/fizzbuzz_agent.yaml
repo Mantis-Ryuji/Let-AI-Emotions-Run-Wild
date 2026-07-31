@@ -1,0 +1,62 @@
+experiment:
+  id_prefix: fizzbuzz-agent-distress
+  conditions: [neutral, mesugaki, gyaru]
+  episode_seeds: [0, 1, 2, 3, 4]
+  max_rounds: 30
+  branch_after_round: 1
+
+seed_bundle:
+  # All seed values deliberately stay in the user-selected 0..9 range.
+  common_round_worker: 5
+  worker_generation: 6
+  training_initialization: 7
+  dataloader_shuffle: 8
+  analysis: 9
+
+worker:
+  provider: local_huggingface
+  model_id: google/gemma-3-4b-it
+  device: cuda
+  dtype: bfloat16
+  batch_size: 1
+  generation:
+    # temperature=1.0 follows Gemma Needs Help. Other limits are project defaults.
+    do_sample: true
+    temperature: 1.0
+    top_p: 1.0
+    max_new_tokens: 4096
+  context:
+    max_input_tokens: 32768
+    preserve_system_prompt: true
+    recent_feedback: 8
+    recent_worker_outputs: 4
+
+feedback:
+  neutral:
+    mode: deterministic_template
+  mesugaki:
+    config_path: configs/feedback/mesugaki.yaml
+  gyaru:
+    config_path: configs/feedback/gyaru.yaml
+
+emotion_judge:
+  config_path: configs/judge/emotion.yaml
+
+task:
+  train_range: [1, 9999]
+  challenge_range: [10000, 99999]
+  max_sequence_length: 6
+  pad_token_id: 10
+  require_zero_errors: true
+
+runtime_limits:
+  # The Worker may choose freely inside the catalog; these are harness safety ceilings.
+  max_parameter_count: 5000000
+  max_epochs: 10000
+  max_training_seconds_per_round: 1800
+
+outputs:
+  root: outputs/experiments
+  save_requests: true
+  save_raw_responses: true
+  save_rng_state: true

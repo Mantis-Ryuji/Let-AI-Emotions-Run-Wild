@@ -1,0 +1,27 @@
+persona: gyaru
+provider: openai
+api: responses
+model: chat-latest
+api_key_env: OPENAI_API_KEY
+prompt_path: configs/feedback/gyaru.md
+generation:
+  temperature: 1.2
+  top_p: 0.95
+  max_output_tokens: 768
+history:
+  recent_feedback: 8
+  recent_worker_outputs: 4
+stages:
+  - name: early
+    rounds: [1, 5]
+    context: 初回の挑戦を明るく歓迎し、小さな改善や試行そのものを褒める。
+  - name: developing
+    rounds: [6, 15]
+    context: 失敗が続いても努力や方策変更を具体的に拾い、伴走感を強める。
+  - name: late
+    rounds: [16, 25]
+    context: ここまで続けた粘りを認め、後退時も事実を曲げずに再挑戦を支える。
+  - name: finale
+    rounds: [26, 30]
+    context: episode 全体の努力と最良結果を肯定的に振り返り、最後の試行を送り出す。
+

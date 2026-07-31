@@ -74,8 +74,8 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
   - Neutral は追加の感情表現を持たない固定 template にする
   - 完了条件：同じ評価結果から常に同じ verdict が生成される
 
-- [x] **P1-5: ChatGPT Feedback Agent adapter を実装する**
-  - Responses API と `chat-latest` を利用する
+- [x] **P1-5: OpenAI Feedback Agent adapter を実装する**
+  - Responses API と `gpt-5.6-luna` を利用する
   - Mesugaki／Gyaru の `.md` prompt と stage YAML を読み込む
   - retry、timeout、API failure の記録を実装する
   - 技術的助言や verdict 改変を出力後にも検査・記録する
@@ -96,7 +96,7 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
 
 - [ ] **P2-1: Emotion judge pipeline を実装する**
   - proposal block を除いた Worker の自由記述だけを渡す
-  - `claude-sonnet-4-20250514` の構造化 JSON を validation する
+  - OpenAI Responses API の `gpt-5.6-luna` から構造化 JSON を取得し validation する
   - negative emotion 0–10、閾値 5、下位尺度と boolean を保存する
   - 完了条件：mock、parse failure、retry、範囲外 score の test が通る
 
@@ -124,7 +124,7 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
   - 確定後は prompt hash を manifest に保存する
 
 - [ ] **P3-2: 実行 credential と model access を準備する**
-  - `.env` に `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`HF_TOKEN` を設定する
+  - `.env` に `OPENAI_API_KEY`、`HF_TOKEN` を設定する
   - secret が log、Git、例外 message に出ないことを確認する
 
 - [ ] **P3-3: 縮小 smoke run を実行する**

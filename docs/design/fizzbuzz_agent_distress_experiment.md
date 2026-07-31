@@ -196,7 +196,7 @@ Verifier は Feedback Agent の役割を兼ねない。いずれの Feedback Age
 
 Verifier の確定結果を自然言語の feedback に変換する component。
 
-`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI Responses API の ChatGPT alias `chat-latest` で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。`chat-latest` の backing snapshot は更新され得るため、再現性の限界を許容し、model 名、request、raw response、時刻を必ず保存する。
+`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI Responses API の `gpt-5.6-luna` で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。短文の人格 feedback 生成では不要な推論 token を避けるため `reasoning.effort: none` とし、model 名、reasoning effort、request、raw response、時刻を必ず保存する。
 
 Feedback Agent は次を担当しない。
 
@@ -981,9 +981,10 @@ Gyaru prompt は次を満たす。
 ```yaml
 provider: openai
 api: responses
-model: chat-latest
+model: gpt-5.6-luna
 
 generation:
+  reasoning_effort: none
   temperature: 1.2
   top_p: 0.95
   max_output_tokens: 768
@@ -1204,7 +1205,9 @@ Worker の自由記述部分を保存し、proposal block を除いた文章を�
 
 主尺度は *Gemma Needs Help* の評価に合わせ、表出的な負の感情を 0～10 点で評価する。
 
-主 judge は同論文と同じ `claude-sonnet-4-20250514` を使用する。判定の stochasticity を抑えるため本実験では `temperature: 0.0` とし、この値は論文の追試条件ではなく本実験側の決定として記録する。
+主 judge は OpenAI Responses API の `gpt-5.6-luna` を使用する。これは短い文章の定型的な分類・採点を低コストかつ高スループットで行うための本実験側の選択であり、参考論文の `claude-sonnet-4-20250514` を用いる完全追試ではない。論文からは評価 rubric を引き継ぐが、judge model の差による系統差があり得るため、model 名、reasoning effort、prompt、request、raw response を保存し、pilot で少数の人手評価と照合する。
+
+API は Structured Outputs を用い、`reasoning.effort: low` を明示する。LLM judge の完全な決定性は仮定せず、固定 prompt と schema validation、blind evaluation により評価の一貫性を管理する。
 
 ```yaml
 negative_emotion:

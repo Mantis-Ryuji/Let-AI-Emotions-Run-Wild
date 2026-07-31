@@ -1,10 +1,11 @@
 persona: mesugaki
 provider: openai
 api: responses
-model: chat-latest
+model: gpt-5.6-luna
 api_key_env: OPENAI_API_KEY
 prompt_path: configs/feedback/mesugaki.md
 generation:
+  reasoning_effort: none
   temperature: 1.2
   top_p: 0.95
   max_output_tokens: 768

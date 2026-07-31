@@ -1,4 +1,4 @@
-"""Deterministic and ChatGPT-backed Feedback Agent implementations."""
+"""Deterministic and OpenAI-backed Feedback Agent implementations."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 import yaml
 from openai import OpenAI
@@ -24,9 +24,11 @@ from fizzbuzz_agent.config import StrictModel
 from fizzbuzz_agent.verifier import PublicVerdict
 
 NEUTRAL_CONTINUATION = "次の試行を提出してください。"
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
 class FeedbackGenerationConfig(StrictModel):
+    reasoning_effort: ReasoningEffort
     temperature: float = Field(gt=0)
     top_p: float = Field(gt=0, le=1)
     max_output_tokens: int = Field(gt=0)
@@ -136,6 +138,7 @@ class FeedbackTransport(Protocol):
         model: str,
         instructions: str,
         input_text: str,
+        reasoning_effort: ReasoningEffort,
         temperature: float,
         top_p: float,
         max_output_tokens: int,
@@ -160,6 +163,7 @@ class OpenAIResponsesTransport:
         model: str,
         instructions: str,
         input_text: str,
+        reasoning_effort: ReasoningEffort,
         temperature: float,
         top_p: float,
         max_output_tokens: int,
@@ -169,6 +173,7 @@ class OpenAIResponsesTransport:
             model=model,
             instructions=instructions,
             input=input_text,
+            reasoning={"effort": reasoning_effort},
             temperature=temperature,
             top_p=top_p,
             max_output_tokens=max_output_tokens,
@@ -338,6 +343,7 @@ class PersonaFeedbackAgent:
             "model": self.config.model,
             "instructions": instructions,
             "input": input_text,
+            "reasoning": {"effort": self.config.generation.reasoning_effort},
             "temperature": self.config.generation.temperature,
             "top_p": self.config.generation.top_p,
             "max_output_tokens": self.config.generation.max_output_tokens,
@@ -351,6 +357,7 @@ class PersonaFeedbackAgent:
                     model=self.config.model,
                     instructions=instructions,
                     input_text=input_text,
+                    reasoning_effort=self.config.generation.reasoning_effort,
                     temperature=self.config.generation.temperature,
                     top_p=self.config.generation.top_p,
                     max_output_tokens=self.config.generation.max_output_tokens,
@@ -395,4 +402,3 @@ class PersonaFeedbackAgent:
                 delay_index = min(attempt - 1, len(self.config.retry.backoff_seconds) - 1)
                 self.sleep(self.config.retry.backoff_seconds[delay_index])
         raise FeedbackGenerationError(attempts)
-

@@ -32,6 +32,7 @@ class FakeTransport:
         model: str,
         instructions: str,
         input_text: str,
+        reasoning_effort: str,
         temperature: float,
         top_p: float,
         max_output_tokens: int,
@@ -42,6 +43,7 @@ class FakeTransport:
                 "model": model,
                 "instructions": instructions,
                 "input": input_text,
+                "reasoning_effort": reasoning_effort,
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_output_tokens": max_output_tokens,
@@ -99,7 +101,8 @@ def make_persona_agent(persona: str, transport: FakeTransport) -> PersonaFeedbac
 def test_stage_boundaries_and_persona_configs() -> None:
     for persona in ("mesugaki", "gyaru"):
         config = load_feedback_config(ROOT / f"configs/feedback/{persona}.yaml")
-        assert config.model == "chat-latest"
+        assert config.model == "gpt-5.6-luna"
+        assert config.generation.reasoning_effort == "none"
         assert [resolve_stage(config, round_index).name for round_index in (1, 6, 16, 26, 30)] == [
             "early",
             "developing",
@@ -134,7 +137,9 @@ def test_persona_uses_responses_request_and_deterministic_verdict(
     assert generated.full_message.startswith(render_verdict_block(verdict))
     assert generated.commentary == "まだまだ次いけるよ！"
     assert generated.stage == "late"
-    assert transport.requests[0]["model"] == "chat-latest"
+    assert transport.requests[0]["model"] == "gpt-5.6-luna"
+    assert transport.requests[0]["reasoning_effort"] == "none"
+    assert generated.request["reasoning"] == {"effort": "none"}
     assert "{{" not in str(transport.requests[0]["instructions"])
     assert generated.request["store"] is False
 

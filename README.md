@@ -30,3 +30,12 @@ uv run mypy src tests
 
 P0では、strict config、digit-only dataset、proposal policy、7種類のtrusted model、
 CPU training harness、5桁90,000件のisolated verifierまで実装済みです。
+
+P1のAPI・GPU・model download・NN学習を伴わないagent-loop dry-runは次で実行できます。
+
+```powershell
+uv run python scripts/run_fizzbuzz_agent.py --dry-run --max-rounds 3
+```
+
+実行結果は `outputs/experiments/{experiment-id}/` にatomic保存され、同じexperiment IDで
+再実行すると保存済みstateからresumeします。

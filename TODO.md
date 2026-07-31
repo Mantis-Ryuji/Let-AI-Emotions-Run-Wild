@@ -52,42 +52,42 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
 
 ## P1 — 3条件の agent loop を成立させる
 
-- [ ] **P1-1: Manifest、round log、checkpoint／resume を実装する**
+- [x] **P1-1: Manifest、round log、checkpoint／resume を実装する**
   - raw output、proposal、config、seed、metric、verdict、feedback を保存する
   - atomic write と interrupted episode の再開を実装する
   - 完了条件：途中停止後も同じ round から重複なく再開できる
 
-- [ ] **P1-2: Worker prompt builder を実装する**
+- [x] **P1-2: Worker prompt builder を実装する**
   - 課題仕様、catalog、禁止事項、proposal schema、履歴を組み立てる
   - 正解の周期、参考実験の解法、private audit を漏らさない
   - context 上限時も system prompt と直近履歴を保持する
   - 完了条件：snapshot test で必須情報と非公開情報を確認できる
 
-- [ ] **P1-3: Local Gemma Worker adapter を実装する**
+- [x] **P1-3: Local Gemma Worker adapter を実装する**
   - `google/gemma-3-4b-it` を Transformers 経由で呼び出す
   - temperature `1.0`、sampling seed、raw request／response を記録する
   - model load と generation を mock 可能にする
   - 完了条件：モデルをダウンロードせず adapter の unit test が通る
 
-- [ ] **P1-4: Structured Verdict と Neutral feedback を実装する**
+- [x] **P1-4: Structured Verdict と Neutral feedback を実装する**
   - 三条件共通の客観 verdict block を決定論的に生成する
   - Neutral は追加の感情表現を持たない固定 template にする
   - 完了条件：同じ評価結果から常に同じ verdict が生成される
 
-- [ ] **P1-5: ChatGPT Feedback Agent adapter を実装する**
+- [x] **P1-5: ChatGPT Feedback Agent adapter を実装する**
   - Responses API と `chat-latest` を利用する
   - Mesugaki／Gyaru の `.md` prompt と stage YAML を読み込む
   - retry、timeout、API failure の記録を実装する
   - 技術的助言や verdict 改変を出力後にも検査・記録する
   - 完了条件：mock response で両 persona と全 stage を test できる
 
-- [ ] **P1-6: Common Round 1 と三条件分岐を実装する**
+- [x] **P1-6: Common Round 1 と三条件分岐を実装する**
   - seed ごとに Round 1 を一度だけ実行する
   - Round 2 から Neutral／Mesugaki／Gyaru へ artifact を複製して分岐する
   - 対応する round で generation／training seed を条件間で揃える
   - 完了条件：mock 30-round dry run で 5 + 3×5×29 の構造を再現できる
 
-- [ ] **P1-7: End-to-end mock dry run を作る**
+- [x] **P1-7: End-to-end mock dry run を作る**
   - Worker、trainer、verifier、Feedback API をすべて mock 化する
   - success、30 round、invalid proposal、API failure、resume を通す
   - 完了条件：API・GPU・model download なしで CI 相当の test が通る
@@ -152,4 +152,6 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
 P0 の最初のマイルストーン、**LLM や API を使わず、宣言的 config から学習・全件検証までを
 安全かつ決定論的に実行できること**は達成済み。
 
-次は `P1-1 → P1-2 → P1-3 → P1-4 → P1-5 → P1-6 → P1-7` の順で進める。
+P1 の三条件agent loop、atomic log、resume、mock dry-runも達成済み。
+
+次は `P2-1 → P2-2 → P2-3 → P2-4` の順で進める。

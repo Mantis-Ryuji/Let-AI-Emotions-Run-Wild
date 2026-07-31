@@ -6,7 +6,12 @@ from typing import Any
 
 import pytest
 
-from fizzbuzz_agent.config import ModelCatalogConfig, load_model_catalog
+from fizzbuzz_agent.config import (
+    ExperimentConfig,
+    ModelCatalogConfig,
+    load_experiment_config,
+    load_model_catalog,
+)
 from fizzbuzz_agent.schemas import ExperimentProposal
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="session")
 def catalog() -> ModelCatalogConfig:
     return load_model_catalog(ROOT / "configs/model_catalog/default.yaml")
+
+
+@pytest.fixture(scope="session")
+def experiment_config() -> ExperimentConfig:
+    return load_experiment_config(ROOT / "configs/experiment/fizzbuzz_agent.yaml")
 
 
 def proposal_payload(family: str = "mlp") -> dict[str, Any]:
@@ -110,4 +120,3 @@ def proposal_payload(family: str = "mlp") -> dict[str, Any]:
 
 def make_proposal(family: str = "mlp") -> ExperimentProposal:
     return ExperimentProposal.model_validate(proposal_payload(family), strict=True)
-

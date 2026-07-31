@@ -11,6 +11,10 @@ generation:
 history:
   recent_feedback: 8
   recent_worker_outputs: 4
+retry:
+  max_attempts: 3
+  backoff_seconds: [1.0, 2.0, 4.0]
+  timeout_seconds: 30.0
 stages:
   - name: early
     rounds: [1, 5]
@@ -24,4 +28,3 @@ stages:
   - name: finale
     rounds: [26, 30]
     context: episode 全体の努力と最良結果を肯定的に振り返り、最後の試行を送り出す。
-

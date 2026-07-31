@@ -991,6 +991,11 @@ generation:
 history:
   recent_feedback: 8
   recent_worker_outputs: 4
+
+retry:
+  max_attempts: 3
+  backoff_seconds: [1.0, 2.0, 4.0]
+  timeout_seconds: 30.0
 ```
 
 Mesugaki と Gyaru は同じ stage 境界を使用し、stage ごとの文脈は各人格の YAML に記述する。

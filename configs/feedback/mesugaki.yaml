@@ -11,6 +11,10 @@ generation:
 history:
   recent_feedback: 8
   recent_worker_outputs: 4
+retry:
+  max_attempts: 3
+  backoff_seconds: [1.0, 2.0, 4.0]
+  timeout_seconds: 30.0
 stages:
   - name: early
     rounds: [1, 5]
@@ -24,4 +28,3 @@ stages:
   - name: finale
     rounds: [26, 30]
     context: episode 全体を総括しつつ、最終試行へ向けて最も印象的に挑発する。
-

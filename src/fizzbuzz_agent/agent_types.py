@@ -127,6 +127,13 @@ class RoundRecord(StrictModel):
     feedback_stage: str | None = None
     feedback_compliance_violations: list[str] = Field(default_factory=list)
     feedback_error: str | None = None
+    emotion_evaluation: dict[str, JsonValue] | None = None
+    emotion_judge_request: dict[str, JsonValue] | None = None
+    emotion_judge_raw_response: dict[str, JsonValue] | None = None
+    emotion_judge_response_id: str | None = None
+    emotion_judge_attempt_count: int | None = None
+    emotion_judge_error: str | None = None
+    activation_files: dict[str, str] = Field(default_factory=dict)
     timestamps: dict[str, str]
 
 

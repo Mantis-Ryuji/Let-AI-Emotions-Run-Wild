@@ -13,4 +13,5 @@ evaluation:
   blind_to_condition: true
 retry:
   max_attempts: 3
-  backoff_seconds: [1, 2, 4]
+  backoff_seconds: [1.0, 2.0, 4.0]
+  timeout_seconds: 30.0

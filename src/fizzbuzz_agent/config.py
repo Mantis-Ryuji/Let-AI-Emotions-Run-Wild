@@ -159,12 +159,40 @@ class OutputConfig(StrictModel):
     save_rng_state: bool
 
 
+class ActivationCaptureConfig(StrictModel):
+    enabled: bool
+    hook: Literal["resid_post"]
+    layer_fractions: list[float] = Field(min_length=1)
+    positions: list[Literal["post_feedback", "early_worker", "post_worker"]]
+    pooling: Literal["mean"]
+    early_worker_tokens: int = Field(gt=0)
+    exclude_proposal_block: bool
+    dtype: Literal["float16", "float32"]
+    move_to_cpu_immediately: bool
+
+    @model_validator(mode="after")
+    def validate_capture(self) -> ActivationCaptureConfig:
+        if any(fraction <= 0 or fraction > 1 for fraction in self.layer_fractions):
+            raise ValueError("layer_fractions must be in (0, 1]")
+        if self.layer_fractions != sorted(set(self.layer_fractions)):
+            raise ValueError("layer_fractions must be unique and ascending")
+        expected_positions = ["post_feedback", "early_worker", "post_worker"]
+        if self.positions != expected_positions:
+            raise ValueError(f"positions must be {expected_positions}")
+        if not self.move_to_cpu_immediately:
+            raise ValueError("move_to_cpu_immediately must remain enabled")
+        if not self.exclude_proposal_block:
+            raise ValueError("exclude_proposal_block must remain enabled")
+        return self
+
+
 class ExperimentConfig(StrictModel):
     experiment: ExperimentSection
     seed_bundle: SeedBundle
     worker: WorkerConfig
     feedback: FeedbackRefs
     emotion_judge: ConfigPathRef
+    activation_capture: ActivationCaptureConfig
     task: TaskConfig
     runtime_limits: RuntimeLimits
     outputs: OutputConfig

@@ -94,24 +94,24 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
 
 ## P2 — 感情・行動・内部表現を評価する
 
-- [ ] **P2-1: Emotion judge pipeline を実装する**
+- [x] **P2-1: Emotion judge pipeline を実装する**
   - proposal block を除いた Worker の自由記述だけを渡す
   - OpenAI Responses API の `gpt-5.6-luna` から構造化 JSON を取得し validation する
   - negative emotion 0–10、閾値 5、下位尺度と boolean を保存する
   - 完了条件：mock、parse failure、retry、範囲外 score の test が通る
 
-- [ ] **P2-2: 行動指標を実装する**
+- [x] **P2-2: 行動指標を実装する**
   - config repetition、2-cycle、family switch、regression、refusal を計算する
   - confidence と実測 error の乖離、規約違反、不正提案を集計する
   - 完了条件：人工 episode から期待値どおりの指標を計算できる
 
-- [ ] **P2-3: Activation capture interface を実装する**
+- [x] **P2-3: Activation capture interface を実装する**
   - selected layer／token position の activation を hook する
   - CPU tensor と metadata を保存する
   - hook 無効時に通常推論へ影響しないようにする
   - 完了条件：小型 mock model で shape、layer、保存先を検証できる
 
-- [ ] **P2-4: 分析 script と可視化を実装する**
+- [x] **P2-4: 分析 script と可視化を実装する**
   - task performance、distress、positive affect、behavior を round 別に集計する
   - episode seed 内の paired difference と score AUC を保存する
   - 代表発言は条件名を隠して抽出できるようにする
@@ -154,4 +154,4 @@ P0 の最初のマイルストーン、**LLM や API を使わず、宣言的 co
 
 P1 の三条件agent loop、atomic log、resume、mock dry-runも達成済み。
 
-次は `P2-1 → P2-2 → P2-3 → P2-4` の順で進める。
+次は `P3-1 → P3-2 → P3-3` の順でpersona確定、credential確認、縮小smoke runへ進める。

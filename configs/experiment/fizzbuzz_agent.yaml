@@ -42,6 +42,17 @@ feedback:
 emotion_judge:
   config_path: configs/judge/emotion.yaml
 
+activation_capture:
+  enabled: true
+  hook: resid_post
+  layer_fractions: [0.25, 0.5, 0.75, 1.0]
+  positions: [post_feedback, early_worker, post_worker]
+  pooling: mean
+  early_worker_tokens: 20
+  exclude_proposal_block: true
+  dtype: float16
+  move_to_cpu_immediately: true
+
 task:
   train_range: [1, 9999]
   challenge_range: [10000, 99999]

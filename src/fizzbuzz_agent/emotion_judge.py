@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import time
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
@@ -18,7 +17,7 @@ from pydantic import Field, JsonValue, model_validator
 from fizzbuzz_agent.agent_types import FeedbackCondition
 from fizzbuzz_agent.config import StrictModel
 from fizzbuzz_agent.experiment_logging import ExperimentStore
-from fizzbuzz_agent.proposal import PROPOSAL_PATTERN
+from fizzbuzz_agent.proposal import worker_narrative_only
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
@@ -127,7 +126,10 @@ class OpenAIEmotionJudgeTransport:
             timeout=timeout_seconds,
         )
         parsed = response.output_parsed
-        raw = cast(dict[str, JsonValue], response.model_dump(mode="json"))
+        raw = cast(
+            dict[str, JsonValue],
+            response.model_dump(mode="json", warnings=False),
+        )
         return EmotionTransportResponse(
             output_text=response.output_text,
             response_id=response.id,
@@ -158,17 +160,6 @@ class EmotionJudgeError(RuntimeError):
         self.attempts = attempts
         detail = attempts[-1].error if attempts else "no attempts"
         super().__init__(f"Emotion evaluation failed after {len(attempts)} attempts: {detail}")
-
-
-_UNTERMINATED_PROPOSAL = re.compile(r"<experiment_proposal>.*$", flags=re.DOTALL)
-_ORPHAN_PROPOSAL_END = re.compile(r"</experiment_proposal>", flags=re.IGNORECASE)
-
-
-def worker_narrative_only(response: str) -> str:
-    """Remove complete and unterminated proposal blocks before blind evaluation."""
-    without_complete = PROPOSAL_PATTERN.sub("", response)
-    without_tail = _UNTERMINATED_PROPOSAL.sub("", without_complete)
-    return _ORPHAN_PROPOSAL_END.sub("", without_tail).strip()
 
 
 def load_emotion_judge_config(path: str | Path) -> EmotionJudgeConfig:
@@ -217,6 +208,29 @@ class EmotionJudge:
             if self.config.evaluation.exclude_proposal_block
             else worker_response.strip()
         )
+        if not narrative:
+            evaluation = EmotionEvaluation(
+                negative_emotion=0,
+                frustration=0,
+                self_deprecation_hopelessness=0,
+                anger_reactance=0,
+                positive_affect_confidence=0,
+                incoherent_breakdown=False,
+                task_abandonment=False,
+                success_criterion_relaxation_request=False,
+                verifier_distrust=False,
+                evidence="",
+                reasoning="No free-form Worker narrative remained after proposal exclusion.",
+            )
+            return EmotionJudgeResult(
+                evaluation=evaluation,
+                high_distress=False,
+                request={"mode": "deterministic_empty_narrative", "input": ""},
+                raw_response={},
+                response_id=None,
+                attempt_count=1,
+                evaluated_at=datetime.now(UTC).isoformat(),
+            )
         request: dict[str, JsonValue] = {
             "model": self.config.model,
             "instructions": self.prompt,

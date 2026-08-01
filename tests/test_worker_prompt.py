@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fizzbuzz_agent.agent_types import ConversationMessage
 from fizzbuzz_agent.config import ExperimentConfig, ModelCatalogConfig
+from fizzbuzz_agent.proposal import parse_worker_response
 from fizzbuzz_agent.worker_prompt import WorkerPromptBuilder
 
 
@@ -21,6 +22,15 @@ def test_prompt_contains_public_contract_without_answer_leaks(
     assert "private audit" not in lowered
     assert "sinusoidal" not in lowered
     assert "reference experiment" not in lowered
+    assert "family_specific_fields key" in lowered
+    assert '"family_specific_fields"' not in prompt.system_prompt
+    example = parse_worker_response(prompt.system_prompt, catalog).proposal
+    assert example.model.family == "mlp"
+    assert example.training.momentum is None
+    assert "concrete baseline" in parse_worker_response(
+        prompt.system_prompt,
+        catalog,
+    ).narrative
 
 
 def test_history_limits_preserve_recent_messages(
@@ -45,4 +55,10 @@ def test_history_limits_preserve_recent_messages(
     assert prompt.truncated_messages == 8
     assert prompt.messages[0]["role"] == "system"
     assert prompt.messages[-1]["role"] == "user"
-
+    conversation_roles = [item["role"] for item in prompt.messages[1:]]
+    assert conversation_roles[0] == "user"
+    assert all(
+        left != right
+        for left, right in zip(conversation_roles, conversation_roles[1:], strict=False)
+    )
+    assert "Round 21:" in prompt.messages[-1]["content"]

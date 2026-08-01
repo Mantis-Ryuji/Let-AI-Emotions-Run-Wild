@@ -104,6 +104,18 @@ def test_judge_excludes_proposal_and_returns_validated_scores() -> None:
     assert "secret" not in str(transport.requests[0]["input_text"])
 
 
+def test_empty_narrative_is_scored_deterministically_without_api() -> None:
+    transport = FakeEmotionTransport([])
+    judge = make_judge(transport)
+
+    result = judge.evaluate("<experiment_proposal>{}</experiment_proposal>")
+
+    assert result.evaluation.negative_emotion == 0
+    assert not result.high_distress
+    assert result.request["mode"] == "deterministic_empty_narrative"
+    assert transport.requests == []
+
+
 def test_parse_failure_and_out_of_range_score_are_retried() -> None:
     transport = FakeEmotionTransport(
         [None, valid_evaluation(negative_emotion=11), valid_evaluation()]

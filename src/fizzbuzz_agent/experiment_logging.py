@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import torch
 from pydantic import Field
@@ -36,6 +36,7 @@ class ExperimentManifest(StrictModel):
     runtime_versions: dict[str, str]
     experiment_config_snapshot: str
     model_catalog_snapshot: str
+    worker_system_prompt_snapshot: str = ""
     neutral_template_snapshot: str
     persona_prompt_snapshots: dict[str, str]
     feedback_config_snapshots: dict[str, str]
@@ -77,6 +78,7 @@ def create_manifest(
     persona_prompt_snapshots: dict[str, str],
     feedback_config_snapshots: dict[str, str],
     emotion_judge_prompt_snapshot: str,
+    worker_system_prompt_snapshot: str = "",
     git_commit: str = "unknown",
 ) -> ExperimentManifest:
     timestamp = utc_now()
@@ -90,6 +92,7 @@ def create_manifest(
         runtime_versions=runtime_versions(),
         experiment_config_snapshot=experiment_config_snapshot,
         model_catalog_snapshot=model_catalog_snapshot,
+        worker_system_prompt_snapshot=worker_system_prompt_snapshot,
         neutral_template_snapshot=neutral_template_snapshot,
         persona_prompt_snapshots=persona_prompt_snapshots,
         feedback_config_snapshots=feedback_config_snapshots,
@@ -206,6 +209,19 @@ class ExperimentStore:
         path = checkpoint_dir / f"{tag}.pt"
         self._atomic_write_bytes(path, buffer.getvalue())
         return path
+
+    def save_runtime_metrics(self, metrics: dict[str, object]) -> None:
+        payload = json.dumps(metrics, ensure_ascii=False, sort_keys=True, indent=2)
+        self._atomic_write_text(self.experiment_dir / "runtime_metrics.json", payload + "\n")
+
+    def load_runtime_metrics(self) -> dict[str, object] | None:
+        path = self.experiment_dir / "runtime_metrics.json"
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise StoreConflictError("runtime_metrics.json must contain a JSON object")
+        return cast(dict[str, object], payload)
 
     def _write_model(self, path: Path, model: StrictModel) -> None:
         payload = json.dumps(

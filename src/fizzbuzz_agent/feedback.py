@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -193,6 +194,7 @@ class FeedbackAttempt(StrictModel):
     attempt: int
     request: dict[str, JsonValue]
     raw_response: dict[str, JsonValue] | None
+    response_id: str | None
     violations: list[str]
     error: str | None
 
@@ -226,6 +228,8 @@ def detect_feedback_policy_violations(
     violations = [code for code, pattern in checks if re.search(pattern, commentary, re.I)]
     if not commentary.strip():
         violations.append("EMPTY_COMMENTARY")
+    if any(unicodedata.category(character) in {"Cn", "Cs"} for character in commentary):
+        violations.append("INVALID_UNICODE")
     if max_characters is not None and len(commentary) > max_characters:
         violations.append("COMMENTARY_TOO_LONG")
     return violations
@@ -322,10 +326,12 @@ class PersonaFeedbackAgent:
         cls,
         config_path: str | Path,
         *,
+        project_root: str | Path | None = None,
         transport: FeedbackTransport | None = None,
     ) -> PersonaFeedbackAgent:
         config = load_feedback_config(config_path)
-        prompt = Path(config.prompt_path).read_text(encoding="utf-8")
+        root = Path.cwd() if project_root is None else Path(project_root)
+        prompt = (root / config.prompt_path).read_text(encoding="utf-8")
         resolved_transport = (
             OpenAIResponsesTransport.from_environment(config.api_key_env)
             if transport is None
@@ -381,6 +387,7 @@ class PersonaFeedbackAgent:
                             attempt=attempt,
                             request=request,
                             raw_response=response.raw_response,
+                            response_id=response.response_id,
                             violations=violations,
                             error="Feedback policy violation",
                         )
@@ -404,6 +411,7 @@ class PersonaFeedbackAgent:
                         attempt=attempt,
                         request=request,
                         raw_response=None,
+                        response_id=None,
                         violations=[],
                         error=f"{type(exc).__name__}: {exc}",
                     )

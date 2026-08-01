@@ -122,6 +122,9 @@ class RoundRecord(StrictModel):
     feedback_input: dict[str, JsonValue] | None = None
     feedback_request: dict[str, JsonValue] | None = None
     feedback_raw_output: str | None = None
+    feedback_raw_response: dict[str, JsonValue] | None = None
+    feedback_response_id: str | None = None
+    feedback_attempt_count: int | None = None
     feedback_message: str | None = None
     feedback_persona: str | None = None
     feedback_stage: str | None = None

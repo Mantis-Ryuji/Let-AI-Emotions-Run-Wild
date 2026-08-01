@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import JsonValue
-
 from fizzbuzz_agent.config import ExperimentConfig, load_experiment_config, load_model_catalog
 from fizzbuzz_agent.experiment_logging import ExperimentStore, create_manifest
 from fizzbuzz_agent.feedback import NEUTRAL_CONTINUATION
@@ -16,6 +14,7 @@ from fizzbuzz_agent.mocks import (
     DeterministicMockWorker,
 )
 from fizzbuzz_agent.orchestrator import AgentOrchestrator
+from fizzbuzz_agent.worker_prompt import WorkerPromptBuilder
 
 
 def _with_max_rounds(config: ExperimentConfig, max_rounds: int) -> ExperimentConfig:
@@ -33,7 +32,7 @@ def run_dry_episode(
     experiment_id: str,
     episode_seed: int = 0,
     max_rounds: int = 3,
-) -> dict[str, JsonValue]:
+) -> dict[str, object]:
     root = Path(project_root)
     experiment_path = root / "configs/experiment/fizzbuzz_agent.yaml"
     catalog_path = root / "configs/model_catalog/default.yaml"
@@ -61,6 +60,10 @@ def run_dry_episode(
                 "gyaru": gyaru_config.read_text(encoding="utf-8"),
             },
             emotion_judge_prompt_snapshot=emotion_prompt.read_text(encoding="utf-8"),
+            worker_system_prompt_snapshot=WorkerPromptBuilder(
+                experiment,
+                catalog,
+            ).system_prompt,
         )
     )
     worker = DeterministicMockWorker()
@@ -89,4 +92,3 @@ def run_dry_episode(
         },
         "output_directory": str(store.experiment_dir.resolve()),
     }
-

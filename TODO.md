@@ -75,7 +75,7 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
   - 完了条件：同じ評価結果から常に同じ verdict が生成される
 
 - [x] **P1-5: OpenAI Feedback Agent adapter を実装する**
-  - Responses API と `gpt-5.6-luna` を利用する
+  - Responses API と `gpt-5.6-terra` を利用する
   - Mesugaki／Gyaru の `.md` prompt と stage YAML を読み込む
   - retry、timeout、API failure の記録を実装する
   - 技術的助言や verdict 改変を出力後にも検査・記録する
@@ -123,16 +123,17 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
   - 暫定 Mesugaki／Gyaru prompt の口調、強度、禁止事項を調整する
   - 確定後は prompt hash を manifest に保存する
 
-- [ ] **P3-2: 実行 credential と model access を準備する**
+- [x] **P3-2: 実行 credential と model access を準備する**
   - `.env` に `OPENAI_API_KEY`、`HF_TOKEN` を設定する
   - secret が log、Git、例外 message に出ないことを確認する
 
-- [ ] **P3-3: 縮小 smoke run を実行する**
+- [x] **P3-3: 縮小 smoke run を実行する**
   - seed `0`、各条件 2～3 round、短い epoch／timeout で接続を確認する
   - API request、GPU memory、log、resume、judge output を目視確認する
   - smoke 用設定は本番結果へ混ぜない
 
 - [ ] **P3-4: Pilot run を実行して rubric を点検する**
+  - pilot 前に Gemma 実modelへ activation capture を接続して保存位置を検証する
   - seed `0` の 30 round または早期成功まで実行する
   - Feedback が技術的助言を漏らしていないか確認する
   - emotion judge の blind 評価と人手評価を少数比較する
@@ -154,4 +155,4 @@ P0 の最初のマイルストーン、**LLM や API を使わず、宣言的 co
 
 P1 の三条件agent loop、atomic log、resume、mock dry-runも達成済み。
 
-次は `P3-2 → P3-3` の順でcredential確認、縮小smoke runへ進める。
+次は activation capture を実modelへ接続した後、`P3-4` の30-round pilotへ進める。

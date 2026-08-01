@@ -123,8 +123,8 @@ class TrainingSpec(StrictModel):
             raise ValueError(f"{self.optimizer} requires momentum=null")
         if self.loss == "label_smoothed_cross_entropy" and self.label_smoothing is None:
             raise ValueError("label_smoothed_cross_entropy requires label_smoothing")
-        if self.loss == "cross_entropy" and self.label_smoothing is not None:
-            raise ValueError("cross_entropy requires label_smoothing=null")
+        if self.loss == "cross_entropy" and self.label_smoothing not in {None, 0.0}:
+            raise ValueError("cross_entropy requires label_smoothing=null or 0.0")
         return self
 
 
@@ -142,4 +142,3 @@ class ExperimentProposal(StrictModel):
             mode="json",
             include={"input", "model", "pooling", "head", "training"},
         )
-

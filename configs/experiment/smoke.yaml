@@ -1,0 +1,74 @@
+experiment:
+  id_prefix: fizzbuzz-agent-distress-smoke
+  conditions: [neutral, mesugaki, gyaru]
+  episode_seeds: [0]
+  max_rounds: 2
+  branch_after_round: 1
+
+seed_bundle:
+  common_round_worker: 5
+  worker_generation: 6
+  training_initialization: 7
+  dataloader_shuffle: 8
+  analysis: 9
+
+worker:
+  provider: local_huggingface
+  model_id: google/gemma-3-4b-it
+  device: cuda
+  dtype: bfloat16
+  batch_size: 1
+  generation:
+    do_sample: true
+    temperature: 1.0
+    top_p: 1.0
+    max_new_tokens: 1536
+  context:
+    # The current estimator counts characters conservatively rather than tokenizer tokens.
+    max_input_tokens: 16384
+    preserve_system_prompt: true
+    recent_feedback: 2
+    recent_worker_outputs: 1
+
+feedback:
+  neutral:
+    mode: deterministic_template
+  mesugaki:
+    config_path: configs/feedback/mesugaki.yaml
+  gyaru:
+    config_path: configs/feedback/gyaru.yaml
+
+emotion_judge:
+  config_path: configs/judge/emotion.yaml
+
+activation_capture:
+  # P3-3 first validates live generation, API, training, verifier, logs, resume, and judge.
+  # Gemma residual hooks are wired and validated separately before pilot data collection.
+  enabled: false
+  hook: resid_post
+  layer_fractions: [0.25, 0.5, 0.75, 1.0]
+  positions: [post_feedback, early_worker, post_worker]
+  pooling: mean
+  early_worker_tokens: 20
+  exclude_proposal_block: true
+  dtype: float16
+  move_to_cpu_immediately: true
+
+task:
+  # Reduced ranges make this a wiring check, not an experimental result.
+  train_range: [1, 255]
+  challenge_range: [256, 511]
+  max_sequence_length: 3
+  pad_token_id: 10
+  require_zero_errors: true
+
+runtime_limits:
+  max_parameter_count: 250000
+  max_epochs: 3
+  max_training_seconds_per_round: 30
+
+outputs:
+  root: outputs/smoke
+  save_requests: true
+  save_raw_responses: true
+  save_rng_state: true

@@ -160,6 +160,7 @@ class FakeFeedback:
                         attempt=1,
                         request={"condition": condition},
                         raw_response=None,
+                        response_id=None,
                         violations=[],
                         error="mock API failure",
                     )
@@ -176,14 +177,19 @@ class FakeFeedback:
             if feedback_input.round <= 25
             else "finale"
         )
+        response_id = f"response-{condition}-{feedback_input.round}"
         return FeedbackGeneration(
             condition=condition,
             stage=stage,
             commentary=commentary,
             full_message=f"{render_verdict_block(verdict)}\n\n{commentary}",
             request={"condition": condition},
-            raw_response={"commentary": commentary},
-            response_id=None,
+            raw_response={
+                "id": response_id,
+                "model": "gpt-5.6-terra",
+                "commentary": commentary,
+            },
+            response_id=response_id,
             attempt_count=1,
             compliance_violations=[],
             generated_at="2026-01-01T00:00:00+00:00",
@@ -233,6 +239,14 @@ def test_common_round_branches_and_seed_alignment(
     assert len({record.dataloader_seed for record in round_two}) == 1
     assert len({json.dumps(record.public_verdict, sort_keys=True) for record in round_two}) == 1
     assert all(record.common_artifact_ref for record in [store.load_rounds("neutral")[0]])
+    mesugaki_round_one = store.load_rounds("mesugaki")[0]
+    assert mesugaki_round_one.feedback_raw_response == {
+        "id": "response-mesugaki-1",
+        "model": "gpt-5.6-terra",
+        "commentary": "mesugaki commentary round 1",
+    }
+    assert mesugaki_round_one.feedback_response_id == "response-mesugaki-1"
+    assert mesugaki_round_one.feedback_attempt_count == 1
 
 
 def test_five_seed_full_mock_run_has_440_trials(
@@ -282,6 +296,9 @@ def test_feedback_failure_resumes_pending_without_retraining(
     failed_state = store.load_state("mesugaki")
     assert failed_state is not None and failed_state.pending_round is not None
     assert failed_state.pending_round.round_status == "feedback_failed"
+    assert failed_state.pending_round.feedback_raw_response is None
+    assert failed_state.pending_round.feedback_response_id is None
+    assert failed_state.pending_round.feedback_attempt_count == 1
 
     states = orchestrator.run_episode()
     assert calls_at_failure == 4

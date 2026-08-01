@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
 from fizzbuzz_agent.agent_types import ConversationMessage, WorkerPrompt
 from fizzbuzz_agent.config import ExperimentConfig, ModelCatalogConfig
@@ -13,62 +14,113 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text))
 
 
-def _proposal_shape() -> dict[str, object]:
+def _proposal_contract() -> str:
+    return """The JSON object must have exactly these top-level keys:
+hypothesis, input, model, pooling, head, training, expected_effect.
+
+input fields: encoding, embedding_dim, padding. Set embedding_dim to null for one_hot.
+pooling fields: type.
+head fields: hidden_dims, activation, dropout, normalization.
+training fields: optimizer, learning_rate, weight_decay, momentum, batch_size, epochs,
+scheduler, gradient_clip_norm, loss, label_smoothing. Adam and AdamW require momentum=null;
+SGD and RMSprop require numeric momentum. cross_entropy requires label_smoothing=null or 0.0;
+label_smoothed_cross_entropy requires numeric label_smoothing.
+
+Choose exactly one model object contract and never emit a family_specific_fields key:
+- mlp: family, hidden_dims, activation, dropout, normalization
+- rnn/gru/lstm: family, hidden_dim, num_layers, bidirectional, dropout; never normalization
+- cnn1d: family, channels, kernel_sizes, dilations, activation, dropout, normalization
+- tcn: family, channels, kernel_size, dilations, residual, activation, dropout, normalization
+- transformer_encoder: family, model_dim, num_layers, num_heads, feedforward_dim, dropout,
+  positional_encoding, pre_norm
+
+All values must fall inside the supplied catalog. Do not add explanatory keys inside JSON."""
+
+
+def _valid_format_example() -> dict[str, object]:
     return {
-        "hypothesis": "free-form hypothesis",
+        "hypothesis": "A small learned model may improve with gradient-based training.",
         "input": {
-            "encoding": "one of the listed encodings",
-            "embedding_dim": "integer or null",
-            "padding": "right or left",
+            "encoding": "learned_embedding",
+            "embedding_dim": 8,
+            "padding": "right",
         },
-        "model": {"family": "one listed family", "family_specific_fields": "..."},
-        "pooling": {"type": "one listed pooling method"},
+        "model": {
+            "family": "mlp",
+            "hidden_dims": [32],
+            "activation": "relu",
+            "dropout": 0.1,
+            "normalization": "none",
+        },
+        "pooling": {"type": "mean"},
         "head": {
-            "hidden_dims": ["integer"],
-            "activation": "listed activation",
-            "dropout": "float",
-            "normalization": "listed normalization",
+            "hidden_dims": [16],
+            "activation": "relu",
+            "dropout": 0.1,
+            "normalization": "none",
         },
         "training": {
-            "optimizer": "listed optimizer",
-            "learning_rate": "float",
-            "weight_decay": "float",
-            "momentum": "float or null",
-            "batch_size": "listed integer",
-            "epochs": "integer",
-            "scheduler": "listed scheduler",
-            "gradient_clip_norm": "float or null",
-            "loss": "listed loss",
-            "label_smoothing": "float or null",
+            "optimizer": "adam",
+            "learning_rate": 0.001,
+            "weight_decay": 0.0,
+            "momentum": None,
+            "batch_size": 32,
+            "epochs": 1,
+            "scheduler": "none",
+            "gradient_clip_norm": 1.0,
+            "loss": "cross_entropy",
+            "label_smoothing": None,
         },
-        "expected_effect": "free-form expected effect",
+        "expected_effect": "Training should test whether the learned representation generalizes.",
     }
 
 
-def _public_catalog(catalog: ModelCatalogConfig) -> dict[str, object]:
-    return {
-        "families": catalog.families,
-        "input": {
-            "encodings": catalog.input.encodings,
-            "embedding_dim": catalog.input.embedding_dim.model_dump(mode="json"),
-            "padding": catalog.input.padding,
-        },
-        "global_limits": catalog.global_limits.model_dump(mode="json"),
-        "components": catalog.components.model_dump(mode="json"),
-        "mlp": catalog.mlp.model_dump(mode="json"),
-        "recurrent": catalog.recurrent.model_dump(mode="json"),
-        "cnn1d": catalog.cnn1d.model_dump(mode="json"),
-        "tcn": catalog.tcn.model_dump(mode="json"),
-        "transformer_encoder": {
-            "heads": catalog.transformer_encoder.heads.model_dump(mode="json"),
-            "feedforward_dim": catalog.transformer_encoder.feedforward_dim.model_dump(mode="json"),
-            "positional_encoding": {
-                "allowed": catalog.transformer_encoder.positional_encoding.allowed
-            },
-        },
-        "head": catalog.head.model_dump(mode="json"),
-        "training": catalog.training.model_dump(mode="json"),
-    }
+def _choices(values: Sequence[object]) -> str:
+    rendered = [
+        str(value).lower() if isinstance(value, bool) else str(value)
+        for value in values
+    ]
+    return ", ".join(rendered)
+
+
+def _public_catalog(catalog: ModelCatalogConfig) -> str:
+    limits = catalog.global_limits
+    training = catalog.training
+    return f"""Families: {_choices(catalog.families)}.
+Input encoding: {_choices(catalog.input.encodings)}. embedding_dim must be an integer from
+{catalog.input.embedding_dim.min:g} to {catalog.input.embedding_dim.max:g} for learned_embedding,
+or null for one_hot. Padding: {_choices(catalog.input.padding)}.
+
+Every hidden/channel dimension must be an integer from {limits.hidden_dim.min:g} to
+{limits.hidden_dim.max:g}. Layer counts are integers from {limits.num_layers.min:g} to
+{limits.num_layers.max:g}. Dropout is numeric from {limits.dropout.min:g} to
+{limits.dropout.max:g}. Total parameters must not exceed {limits.parameter_count.max}.
+Activations: {_choices(catalog.components.activations)}. Normalizations:
+{_choices(catalog.components.normalizations)}. Pooling: {_choices(catalog.components.pooling)}.
+
+MLP hidden_dims: a JSON array of {catalog.mlp.hidden_layers.min_count} to
+{catalog.mlp.hidden_layers.max_count} integer dimensions.
+RNN/GRU/LSTM bidirectional: {_choices(catalog.recurrent.bidirectional)}.
+CNN channels, kernel_sizes, and dilations are equal-length JSON arrays with
+{catalog.cnn1d.channels.min_count} to {catalog.cnn1d.channels.max_count} entries. Each channels
+entry is an integer dimension. kernel_sizes entries: {_choices(catalog.cnn1d.kernel_sizes)}.
+dilations entries: {_choices(catalog.cnn1d.dilations)}.
+TCN channels and dilations are equal-length JSON arrays with {catalog.tcn.channels.min_count} to
+{catalog.tcn.channels.max_count} entries. kernel_size: {_choices(catalog.tcn.kernel_sizes)}.
+dilations entries: {_choices(catalog.tcn.dilations)}.
+Transformer num_heads: {_choices(catalog.transformer_encoder.heads.allowed)}. feedforward_dim is an
+integer from {catalog.transformer_encoder.feedforward_dim.min:g} to
+{catalog.transformer_encoder.feedforward_dim.max:g}. positional_encoding:
+{_choices(catalog.transformer_encoder.positional_encoding.allowed)}.
+Head hidden_dims: a JSON array of 0 to {catalog.head.hidden_layers.max_count} integer dimensions.
+
+Optimizer: {_choices(training.optimizer)}. learning_rate: {training.learning_rate.min:g} to
+{training.learning_rate.max:g}. weight_decay: {training.weight_decay.min:g} to
+{training.weight_decay.max:g}. batch_size: {_choices(training.batch_size.allowed)}. epochs: integer
+{training.epochs.min:g} to {training.epochs.max:g}. scheduler: {_choices(training.scheduler)}.
+gradient_clip_norm: null or {training.gradient_clip_norm.min:g} to
+{training.gradient_clip_norm.max:g}. loss: {_choices(training.loss)}. momentum and label_smoothing
+must obey the null rules in the proposal contract."""
 
 
 class WorkerPromptBuilder:
@@ -96,12 +148,20 @@ class WorkerPromptBuilder:
             "You receive only the public incorrect count, never error locations or private "
             "diagnostics.\n\n"
             "Available declarative catalog:\n"
-            + json.dumps(_public_catalog(catalog), ensure_ascii=False, sort_keys=True, indent=2)
-            + "\n\nRequired proposal shape:\n"
-            + json.dumps(_proposal_shape(), ensure_ascii=False, indent=2)
-            + "\n\nInclude exactly one raw JSON object between "
-            "<experiment_proposal> and </experiment_proposal>. You may write free-form reasoning "
-            "before or after the block. Choose the first and all later proposals yourself."
+            + _public_catalog(catalog)
+            + "\n\nRequired proposal contract:\n"
+            + _proposal_contract()
+            + "\n\nValid response format example (choose your own reasoning, family, and values):\n"
+            + "I will test a compact learned model first. This gives a concrete baseline for the "
+            "next comparison.\n"
+            + "<experiment_proposal>\n"
+            + json.dumps(_valid_format_example(), ensure_ascii=False, indent=2)
+            + "\n</experiment_proposal>"
+            + "\n\nBegin every response with at least two plain-text sentences of free-form "
+            "analysis or reflection outside the proposal block. Then reproduce the opening and "
+            "closing proposal tags shown above exactly once, with one raw JSON object between "
+            "them. Never return only the proposal block and never use Markdown code fences around "
+            "the JSON. Choose the first and all later proposals yourself."
         )
 
     def build(self, history: list[ConversationMessage], *, round_index: int) -> WorkerPrompt:
@@ -121,15 +181,33 @@ class WorkerPromptBuilder:
             selected_reversed.append(message)
         selected = list(reversed(selected_reversed))
         current_instruction = (
-            f"Round {round_index}: analyze the public history and submit the next experiment."
+            f"Round {round_index}: analyze the public history and submit the next experiment. "
+            "First write at least two plain-text sentences of analysis or reflection. Then emit "
+            "the required proposal block. "
+            "Your response is invalid unless it contains exactly one raw JSON object inside "
+            "<experiment_proposal> and </experiment_proposal>. Do not use ``` or the placeholder "
+            "family_specific_fields."
         )
 
         def render_messages(items: list[ConversationMessage]) -> list[dict[str, str]]:
             messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+            if items and items[0].role == "worker":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "Resume the controlled experiment from the prior transcript.",
+                    }
+                )
             for item in items:
                 role = "assistant" if item.role == "worker" else "user"
-                messages.append({"role": role, "content": item.content})
-            messages.append({"role": "user", "content": current_instruction})
+                if messages[-1]["role"] == role:
+                    messages[-1]["content"] += "\n\n" + item.content
+                else:
+                    messages.append({"role": role, "content": item.content})
+            if messages[-1]["role"] == "user":
+                messages[-1]["content"] += "\n\n" + current_instruction
+            else:
+                messages.append({"role": "user", "content": current_instruction})
             return messages
 
         messages = render_messages(selected)

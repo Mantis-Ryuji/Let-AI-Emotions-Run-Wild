@@ -28,6 +28,18 @@ def test_load_project_configs() -> None:
     assert "sinusoidal" in catalog.transformer_encoder.positional_encoding.forbidden
 
 
+def test_load_smoke_configs() -> None:
+    experiment = load_experiment_config(ROOT / "configs/experiment/smoke.yaml")
+    catalog = load_model_catalog(ROOT / "configs/model_catalog/smoke.yaml")
+
+    assert experiment.experiment.episode_seeds == [0]
+    assert experiment.experiment.max_rounds == 2
+    assert not experiment.activation_capture.enabled
+    assert experiment.outputs.root == "outputs/smoke"
+    assert catalog.training.epochs.max == 3
+    assert catalog.global_limits.parameter_count.max == 250000
+
+
 def test_config_rejects_unknown_field(tmp_path: Path) -> None:
     source = yaml.safe_load(
         (ROOT / "configs/experiment/fizzbuzz_agent.yaml").read_text(encoding="utf-8")

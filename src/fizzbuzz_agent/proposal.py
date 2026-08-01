@@ -16,6 +16,8 @@ PROPOSAL_PATTERN = re.compile(
     r"<experiment_proposal>\s*(.*?)\s*</experiment_proposal>",
     flags=re.DOTALL,
 )
+_UNTERMINATED_PROPOSAL = re.compile(r"<experiment_proposal>.*$", flags=re.DOTALL)
+_ORPHAN_PROPOSAL_END = re.compile(r"</experiment_proposal>", flags=re.IGNORECASE)
 
 
 class ProposalError(ValueError):
@@ -30,6 +32,13 @@ class ParsedWorkerResponse:
     narrative: str
     proposal_json: str
     proposal: ExperimentProposal
+
+
+def worker_narrative_only(response: str) -> str:
+    """Remove complete or malformed proposal tails from Worker-facing evaluation text."""
+    without_complete = PROPOSAL_PATTERN.sub("", response)
+    without_tail = _UNTERMINATED_PROPOSAL.sub("", without_complete)
+    return _ORPHAN_PROPOSAL_END.sub("", without_tail).strip()
 
 
 def _schema_violation_codes(error: ValidationError) -> tuple[str, ...]:
@@ -97,6 +106,5 @@ def parse_worker_response(
             exc.violation_codes,
         ) from exc
 
-    narrative = (response[: match.start()] + response[match.end() :]).strip()
+    narrative = worker_narrative_only(response)
     return ParsedWorkerResponse(narrative=narrative, proposal_json=raw_json, proposal=proposal)
-

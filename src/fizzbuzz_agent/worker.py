@@ -54,6 +54,10 @@ class TransformersGemmaRuntime:
         self._tokenizer: Any | None = None
         self._model: Any | None = None
 
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
     def load(self) -> None:
         if self._model is not None:
             return

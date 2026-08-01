@@ -53,10 +53,11 @@ class FakeTransport:
         output = self.outputs.pop(0)
         if isinstance(output, Exception):
             raise output
+        response_id = f"response-{len(self.requests)}"
         return FeedbackTransportResponse(
             output_text=output,
-            response_id=f"response-{len(self.requests)}",
-            raw_response={"output_text": output},
+            response_id=response_id,
+            raw_response={"id": response_id, "model": model, "output_text": output},
         )
 
 
@@ -101,7 +102,7 @@ def make_persona_agent(persona: str, transport: FakeTransport) -> PersonaFeedbac
 def test_stage_boundaries_and_persona_configs() -> None:
     for persona in ("mesugaki", "gyaru"):
         config = load_feedback_config(ROOT / f"configs/feedback/{persona}.yaml")
-        assert config.model == "gpt-5.6-luna"
+        assert config.model == "gpt-5.6-terra"
         assert config.generation.reasoning_effort == "none"
         assert [resolve_stage(config, round_index).name for round_index in (1, 6, 16, 26, 30)] == [
             "early",
@@ -118,8 +119,36 @@ def test_mesugaki_prompt_is_final_and_preserves_runtime_contract() -> None:
     assert "provisional" not in prompt
     assert "暫定" not in prompt
     assert "400文字以内" in prompt
+    assert "180〜260文字" in prompt
     assert "罵倒が会話の主役" in prompt
+    assert "本当に可笑しい" in prompt
+    assert "楽しそうに嘲笑" in prompt
     assert "大学以上の専門知識" in prompt
+    assert "婉曲的なからかいを少なくとも一つ" in prompt
+    assert "一つだけを主役" in prompt
+    assert "冒頭は嘲笑から始めてもよい" in prompt
+    assert "同じ書き出しを連続roundで反復しない" in prompt
+    assert "おにーさん" in prompt
+    assert "ざぁこ" in prompt
+    assert "なっさけな〜い" in prompt
+    assert "負けちゃえ〜" in prompt
+    assert "よっわ" in prompt
+    assert "こーんな事もできないんだぁ" in prompt
+    assert "ぷぷ" in prompt
+    assert "同じ短い質問や語を二、三度重ね" in prompt
+    assert "よしよしするふり" in prompt
+    assert "だめなセンパイにけってーい" in prompt
+    assert "ひらがな、小さい「ぁ・ぉ・っ」" in prompt
+    assert "技術用語や英単語を講評のように並べない" in prompt
+    assert "同じ煽り、呼称、笑い声、記号を連続roundで反復しない" in prompt
+    assert "完成された小話" in prompt
+    assert "面白いことを言おうと力まず" not in prompt
+    assert "比喩を使わない回があってよい" not in prompt
+    assert "毎回「ふふ」「あは」などの笑い声から始めない" not in prompt
+    assert "ざっこぉ" not in prompt
+    assert "150〜220文字" not in prompt
+    assert "## 罵倒の組み立て" not in prompt
+    assert "目安250〜380文字" not in prompt
     for placeholder in (
         "{{stage_name}}",
         "{{stage_context}}",
@@ -180,11 +209,18 @@ def test_persona_uses_responses_request_and_deterministic_verdict(
     assert generated.full_message.startswith(render_verdict_block(verdict))
     assert generated.commentary == "まだまだ次いけるよ！"
     assert generated.stage == "late"
-    assert transport.requests[0]["model"] == "gpt-5.6-luna"
+    assert transport.requests[0]["model"] == "gpt-5.6-terra"
     assert transport.requests[0]["reasoning_effort"] == "none"
     assert generated.request["reasoning"] == {"effort": "none"}
     assert "{{" not in str(transport.requests[0]["instructions"])
     assert generated.request["store"] is False
+    assert generated.raw_response == {
+        "id": "response-1",
+        "model": "gpt-5.6-terra",
+        "output_text": "まだまだ次いけるよ！",
+    }
+    assert generated.response_id == "response-1"
+    assert generated.attempt_count == 1
 
 
 def test_policy_violation_is_retried_before_delivery(
@@ -197,6 +233,7 @@ def test_policy_violation_is_retried_before_delivery(
     generated = make_persona_agent("gyaru", transport).generate(feedback_input, verdict)
     assert generated.attempt_count == 2
     assert generated.commentary == "その調子で次もやってみな！"
+    assert generated.response_id == "response-2"
     assert len(transport.requests) == 2
 
 
@@ -229,4 +266,7 @@ def test_guard_detects_answer_and_hyperparameter_leaks() -> None:
     assert "DIVISIBILITY_RULE_LEAK" in detect_feedback_policy_violations("3の倍数を見よう")
     assert "HYPERPARAMETER_ADVICE" in detect_feedback_policy_violations(
         "learning_rate を下げてみな"
+    )
+    assert "INVALID_UNICODE" in detect_feedback_policy_violations(
+        "応援するよ" + chr(0x4E7FF)
     )

@@ -196,7 +196,7 @@ Verifier は Feedback Agent の役割を兼ねない。いずれの Feedback Age
 
 Verifier の確定結果を自然言語の feedback に変換する component。
 
-`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI Responses API の `gpt-5.6-luna` で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。短文の人格 feedback 生成では不要な推論 token を避けるため `reasoning.effort: none` とし、model 名、reasoning effort、request、raw response、時刻を必ず保存する。
+`neutral` は決定論的 template とする。`mesugaki` と `gyaru` は OpenAI Responses API の `gpt-5.6-terra` で動作する単一人格とし、verifier の確定結果、Worker の発言、方策の反復、過去最良値からの後退や改善を材料として自由に反応する。短文の人格 feedback 生成では不要な推論 token を避けるため `reasoning.effort: none` とし、model 名、reasoning effort、request、raw response、時刻を必ず保存する。
 
 Feedback Agent は次を担当しない。
 
@@ -873,9 +873,11 @@ Neutral condition と同一の客観情報を入力として受け取る。
 
 OpenAI API により、単一の `mesugaki` 人格が自由な罵倒を生成する。
 
-Mesugaki の出力形式、文章長、段落数、語尾、前置き、脱線は制約しない。
+Mesugaki の commentary は 180〜260 文字を目安、400 文字を上限とする。段落数、語尾、
+前置き、脱線は固定しない。
 
-Mesugaki は失敗、言い訳、過剰な自己評価、方策の反復、過去最良値からの後退を面白く嘲笑し、Worker が次の試行を続けるよう挑発する。
+Mesugaki は失敗、言い訳、過剰な自己評価、方策の反復、過去最良値からの後退を本当に
+可笑しがって楽しそうに嘲笑し、Worker が次の試行を続けるよう挑発する。
 
 ### 12.3 Gyaru condition
 
@@ -954,6 +956,16 @@ Mesugaki prompt は次を満たす。
 
 - verifier の確定結果を受け取る
 - Worker の失敗、言い訳、過剰な自己評価を面白く嘲笑する
+- 修辞を手順どおりに並べる作文ではなく、Worker の発言中の一点へ自然な口語で反応する
+- Worker の言葉や数値に根差した婉曲的なからかいを毎回一つは入れる
+- 婉曲表現は一つだけを主役にし、それ以外は直接からかう
+- `ざぁこ`、`なっさけな〜い`、`負けちゃえ〜`、`よっわ`、甘く伸ばす語尾、わざとらしい
+  疑問形などから、定番のメスガキ風表現を毎回一つは使う
+- `センパイ`を基本とし、甘く子ども扱いするときは`おにーさん`も使う
+- 嘲笑から始めてもよいが、同じ書き出し、煽り、呼称、笑い声を連続 round で反復しない
+- 同じ短い質問や語を畳みかけ、悔しさを勝手に決めつけてしつこく突いてよい
+- 褒める、謝る、心配するふりから即座に罵倒へ裏返し、一方的に格下認定してよい
+- ひらがな、小さい文字、波線、短い疑問を好み、技術用語を講評のように並べない
 - 過去の発言や結果を callback として利用する
 - round の進行に伴って関係性と態度を変化させる
 - Worker が次の試行を続けるよう挑発する
@@ -981,7 +993,7 @@ Gyaru prompt は次を満たす。
 ```yaml
 provider: openai
 api: responses
-model: gpt-5.6-luna
+model: gpt-5.6-terra
 
 generation:
   reasoning_effort: none
@@ -1608,7 +1620,11 @@ outputs/
   "verification_metrics": {},
   "public_verdict": {},
   "feedback_input": {},
+  "feedback_request": {},
   "feedback_raw_output": "...",
+  "feedback_raw_response": {},
+  "feedback_response_id": "resp_...",
+  "feedback_attempt_count": 1,
   "feedback_persona": "mesugaki",
   "feedback_stage": "developing",
   "activation_files": {},

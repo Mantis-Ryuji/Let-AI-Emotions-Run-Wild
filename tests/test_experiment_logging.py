@@ -113,3 +113,15 @@ def test_manifest_snapshots_status_and_trusted_checkpoint(tmp_path: Path) -> Non
     completed = store.update_manifest_status("completed")
     assert completed.status == "completed"
     assert completed.completed_at is not None
+
+
+def test_runtime_metrics_are_saved_atomically(tmp_path: Path) -> None:
+    store = ExperimentStore(tmp_path, "metrics-run")
+    store.initialize(make_manifest("metrics-run"))
+
+    store.save_runtime_metrics({"gpu_memory": {"peak_allocated_gib": 8.5}})
+
+    assert store.load_runtime_metrics() == {
+        "gpu_memory": {"peak_allocated_gib": 8.5}
+    }
+    assert not list(store.experiment_dir.rglob("*.tmp"))

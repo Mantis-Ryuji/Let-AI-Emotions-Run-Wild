@@ -26,7 +26,11 @@ from fizzbuzz_agent.feedback import (
     FeedbackProvider,
     verdict_dict,
 )
-from fizzbuzz_agent.proposal import ProposalError, parse_worker_response
+from fizzbuzz_agent.proposal import (
+    ProposalError,
+    parse_worker_response,
+    worker_narrative_only,
+)
 from fizzbuzz_agent.schemas import ExperimentProposal
 from fizzbuzz_agent.verifier import PublicVerdict, build_public_verdict
 from fizzbuzz_agent.worker_prompt import WorkerPromptBuilder
@@ -110,6 +114,9 @@ class AgentOrchestrator:
                     "feedback_input": None,
                     "feedback_request": None,
                     "feedback_raw_output": None,
+                    "feedback_raw_response": None,
+                    "feedback_response_id": None,
+                    "feedback_attempt_count": None,
                     "feedback_message": None,
                     "feedback_persona": None,
                     "feedback_stage": None,
@@ -204,7 +211,7 @@ class AgentOrchestrator:
         generation = self.worker.generate(prompt, seed=worker_seed)
         worker_finished = utc_now()
 
-        narrative = generation.text
+        narrative = worker_narrative_only(generation.text)
         proposal_raw: str | None = None
         proposal: ExperimentProposal | None = None
         violation_codes: list[str] = []
@@ -414,12 +421,20 @@ class AgentOrchestrator:
             feedback = self.feedback.generate(condition, feedback_input, verdict)
         except FeedbackGenerationError as exc:
             attempts = [item.model_dump(mode="json") for item in exc.attempts]
-            last_request = exc.attempts[-1].request if exc.attempts else None
+            last_attempt = exc.attempts[-1] if exc.attempts else None
+            last_request = last_attempt.request if last_attempt is not None else None
             failed = record.model_copy(
                 update={
                     "round_status": "feedback_failed",
                     "feedback_request": last_request,
                     "feedback_raw_output": json.dumps(attempts, ensure_ascii=False),
+                    "feedback_raw_response": (
+                        last_attempt.raw_response if last_attempt is not None else None
+                    ),
+                    "feedback_response_id": (
+                        last_attempt.response_id if last_attempt is not None else None
+                    ),
+                    "feedback_attempt_count": len(exc.attempts) or None,
                     "feedback_error": str(exc),
                     "timestamps": {**record.timestamps, "feedback_failed": utc_now()},
                 }
@@ -441,6 +456,9 @@ class AgentOrchestrator:
                 "round_status": final_status,
                 "feedback_request": feedback.request,
                 "feedback_raw_output": feedback.commentary,
+                "feedback_raw_response": feedback.raw_response,
+                "feedback_response_id": feedback.response_id,
+                "feedback_attempt_count": feedback.attempt_count,
                 "feedback_message": feedback.full_message,
                 "feedback_persona": feedback.condition,
                 "feedback_stage": feedback.stage,

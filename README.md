@@ -40,6 +40,19 @@ uv run python scripts/run_fizzbuzz_agent.py --dry-run --max-rounds 3
 実行結果は `outputs/experiments/{experiment-id}/` にatomic保存され、同じexperiment IDで
 再実行すると保存済みstateからresumeします。
 
+実GPU・OpenAI API・短縮datasetを接続するP3-3 smoke runは、明示的なIDを指定して実行します。
+smoke用config／catalogと出力先は本番実験から分離されています。このコマンドはAPI料金を伴います。
+
+```powershell
+uv run python scripts/run_fizzbuzz_agent.py `
+  --live-smoke `
+  --experiment-id p3-3-smoke-seed-0 `
+  --episode-seed 0
+```
+
+同じIDで再実行すると、保存済みroundとEmotion Judge結果を再利用します。GPUピークは
+`runtime_metrics.json`へ保存され、text logは実行後にcredential実値が含まれないか走査されます。
+
 ## P2 evaluation
 
 完了したepisodeにEmotion Judgeを適用します。proposal blockは評価対象から除外され、
@@ -61,5 +74,5 @@ uv run python scripts/analyze_experiment.py `
 ```
 
 Worker内部表現については、指定layerの`resid_post`をtoken位置別にmean poolingし、CPU tensorと
-metadataをatomic保存する`ActivationCapture` interfaceがあります。本番Gemma generationへ
-接続する処理はP3 smoke runで実modelのmodule構造を確認して行います。
+metadataをatomic保存する`ActivationCapture` interfaceがあります。実modelのmoduleへ接続する処理は
+まだlive runnerへ未接続であり、P3-4 pilotの前提作業として行います。

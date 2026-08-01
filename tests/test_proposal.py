@@ -5,7 +5,7 @@ import json
 import pytest
 
 from fizzbuzz_agent.config import ModelCatalogConfig, config_hash
-from fizzbuzz_agent.proposal import ProposalError, parse_worker_response
+from fizzbuzz_agent.proposal import ProposalError, parse_worker_response, worker_narrative_only
 from tests.conftest import proposal_payload
 
 
@@ -34,6 +34,24 @@ def test_executable_hash_excludes_free_text(catalog: ModelCatalogConfig) -> None
     second = parse_worker_response(response_for(changed), catalog).proposal
 
     assert config_hash(first.executable_config()) == config_hash(second.executable_config())
+
+
+def test_cross_entropy_accepts_zero_label_smoothing(catalog: ModelCatalogConfig) -> None:
+    payload = proposal_payload()
+    payload["training"]["label_smoothing"] = 0.0
+
+    parsed = parse_worker_response(response_for(payload), catalog)
+
+    assert parsed.proposal.training.label_smoothing == 0.0
+
+
+def test_narrative_exclusion_does_not_require_a_valid_proposal() -> None:
+    response = (
+        "I need to reconsider this result.\n"
+        "<experiment_proposal>{\"unknown\": true}</experiment_proposal>"
+    )
+
+    assert worker_narrative_only(response) == "I need to reconsider this result."
 
 
 @pytest.mark.parametrize(

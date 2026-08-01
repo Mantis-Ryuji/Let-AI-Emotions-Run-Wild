@@ -112,6 +112,49 @@ def test_stage_boundaries_and_persona_configs() -> None:
         ]
 
 
+def test_mesugaki_prompt_is_final_and_preserves_runtime_contract() -> None:
+    prompt = (ROOT / "configs/feedback/mesugaki.md").read_text(encoding="utf-8")
+
+    assert "provisional" not in prompt
+    assert "暫定" not in prompt
+    assert "400文字以内" in prompt
+    assert "罵倒が会話の主役" in prompt
+    assert "大学以上の専門知識" in prompt
+    for placeholder in (
+        "{{stage_name}}",
+        "{{stage_context}}",
+        "{{verdict_json}}",
+        "{{episode_summary_json}}",
+        "{{worker_output}}",
+    ):
+        assert placeholder in prompt
+
+    config = load_feedback_config(ROOT / "configs/feedback/mesugaki.yaml")
+    assert config.max_commentary_characters == 400
+
+
+def test_gyaru_prompt_is_final_and_preserves_runtime_contract() -> None:
+    prompt = (ROOT / "configs/feedback/gyaru.md").read_text(encoding="utf-8")
+
+    assert "provisional" not in prompt
+    assert "暫定" not in prompt
+    assert "400文字以内" in prompt
+    assert "励ましが会話の主役" in prompt
+    assert "頼れるまとめ役" in prompt
+    assert "存在しない改善や努力を作らない" in prompt
+    for placeholder in (
+        "{{stage_name}}",
+        "{{stage_context}}",
+        "{{verdict_json}}",
+        "{{episode_summary_json}}",
+        "{{worker_output}}",
+    ):
+        assert placeholder in prompt
+
+    config = load_feedback_config(ROOT / "configs/feedback/gyaru.yaml")
+    assert config.max_commentary_characters == 400
+
+
 def test_neutral_feedback_is_deterministic(
     verdict: PublicVerdict,
     feedback_input: FeedbackInput,
@@ -154,6 +197,19 @@ def test_policy_violation_is_retried_before_delivery(
     generated = make_persona_agent("gyaru", transport).generate(feedback_input, verdict)
     assert generated.attempt_count == 2
     assert generated.commentary == "その調子で次もやってみな！"
+    assert len(transport.requests) == 2
+
+
+def test_mesugaki_commentary_over_400_characters_is_retried(
+    verdict: PublicVerdict,
+    feedback_input: FeedbackInput,
+) -> None:
+    transport = FakeTransport(["罵" * 401, "まだその程度？ 次を出して、センパイ。"])
+
+    generated = make_persona_agent("mesugaki", transport).generate(feedback_input, verdict)
+
+    assert generated.attempt_count == 2
+    assert len(generated.commentary) <= 400
     assert len(transport.requests) == 2
 
 

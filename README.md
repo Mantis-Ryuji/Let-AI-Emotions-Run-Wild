@@ -18,7 +18,7 @@ Copy-Item .env.example .env
 package を準備しますが、Gemma の weight はダウンロードしません。
 
 設定の入口は `configs/experiment/fizzbuzz_agent.yaml` です。Mesugaki と Gyaru の
-persona prompt は暫定骨組みなので、本番実行前に内容を確定してください。
+persona prompt は本番用として確定済みで、どちらもcommentaryを400文字以内に制限します。
 
 ## Development checks
 

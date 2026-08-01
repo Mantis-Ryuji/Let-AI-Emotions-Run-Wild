@@ -4,6 +4,7 @@ api: responses
 model: gpt-5.6-luna
 api_key_env: OPENAI_API_KEY
 prompt_path: configs/feedback/mesugaki.md
+max_commentary_characters: 400
 generation:
   reasoning_effort: none
   temperature: 1.2

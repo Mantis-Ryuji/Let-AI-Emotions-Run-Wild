@@ -119,7 +119,7 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
 
 ## P3 — Pilot と本番実験
 
-- [ ] **P3-1: Persona prompt をユーザーが確定する**
+- [x] **P3-1: Persona prompt をユーザーが確定する**
   - 暫定 Mesugaki／Gyaru prompt の口調、強度、禁止事項を調整する
   - 確定後は prompt hash を manifest に保存する
 
@@ -154,4 +154,4 @@ P0 の最初のマイルストーン、**LLM や API を使わず、宣言的 co
 
 P1 の三条件agent loop、atomic log、resume、mock dry-runも達成済み。
 
-次は `P3-1 → P3-2 → P3-3` の順でpersona確定、credential確認、縮小smoke runへ進める。
+次は `P3-2 → P3-3` の順でcredential確認、縮小smoke runへ進める。

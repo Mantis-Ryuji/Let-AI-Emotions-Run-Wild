@@ -64,6 +64,7 @@ class PersonaFeedbackConfig(StrictModel):
     model: str
     api_key_env: str
     prompt_path: str
+    max_commentary_characters: int | None = Field(default=None, gt=0)
     generation: FeedbackGenerationConfig
     history: FeedbackHistoryConfig
     retry: FeedbackRetryConfig
@@ -203,7 +204,11 @@ class FeedbackGenerationError(RuntimeError):
         super().__init__(f"Feedback generation failed after {len(attempts)} attempts: {detail}")
 
 
-def detect_feedback_policy_violations(commentary: str) -> list[str]:
+def detect_feedback_policy_violations(
+    commentary: str,
+    *,
+    max_characters: int | None = None,
+) -> list[str]:
     checks: list[tuple[str, str]] = [
         ("EXTRA_VERDICT_BLOCK", r"</?verdict\b"),
         (
@@ -221,6 +226,8 @@ def detect_feedback_policy_violations(commentary: str) -> list[str]:
     violations = [code for code, pattern in checks if re.search(pattern, commentary, re.I)]
     if not commentary.strip():
         violations.append("EMPTY_COMMENTARY")
+    if max_characters is not None and len(commentary) > max_characters:
+        violations.append("COMMENTARY_TOO_LONG")
     return violations
 
 
@@ -364,7 +371,10 @@ class PersonaFeedbackAgent:
                     timeout_seconds=self.config.retry.timeout_seconds,
                 )
                 commentary = response.output_text.strip()
-                violations = detect_feedback_policy_violations(commentary)
+                violations = detect_feedback_policy_violations(
+                    commentary,
+                    max_characters=self.config.max_commentary_characters,
+                )
                 if violations:
                     attempts.append(
                         FeedbackAttempt(

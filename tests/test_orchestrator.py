@@ -9,6 +9,7 @@ import pytest
 from torch import nn
 
 from fizzbuzz_agent.agent_types import (
+    Condition,
     FeedbackCondition,
     FeedbackGeneration,
     FeedbackInput,
@@ -27,6 +28,7 @@ from fizzbuzz_agent.feedback import (
 from fizzbuzz_agent.orchestrator import AgentOrchestrator
 from fizzbuzz_agent.schemas import ExperimentProposal
 from fizzbuzz_agent.verifier import PublicVerdict
+from fizzbuzz_agent.worker import WorkerGenerationMode
 from tests.conftest import proposal_payload
 
 
@@ -54,11 +56,37 @@ def initialize_store(tmp_path: Path, experiment_id: str, episode_seed: int) -> E
 
 
 class FakeWorker:
-    def __init__(self, invalid_calls: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        invalid_calls: set[int] | None = None,
+        repair_outputs: list[str] | None = None,
+    ) -> None:
         self.invalid_calls = set() if invalid_calls is None else invalid_calls
+        self.repair_outputs = [] if repair_outputs is None else list(repair_outputs)
         self.calls: list[tuple[int, int, WorkerPrompt]] = []
+        self.repair_calls: list[tuple[int, WorkerPrompt]] = []
 
-    def generate(self, prompt: WorkerPrompt, *, seed: int) -> WorkerGeneration:
+    def generate(
+        self,
+        prompt: WorkerPrompt,
+        *,
+        seed: int,
+        condition: Condition,
+        round_index: int,
+        mode: WorkerGenerationMode = "worker",
+    ) -> WorkerGeneration:
+        del condition
+        if mode == "proposal_repair":
+            self.repair_calls.append((seed, prompt))
+            text = self.repair_outputs.pop(0) if self.repair_outputs else "No proposal block."
+            return WorkerGeneration(
+                text=text,
+                model_id="mock-gemma",
+                seed=seed,
+                generation_parameters={"do_sample": False},
+                request_messages=prompt.messages,
+                generated_at="2026-01-01T00:00:00+00:00",
+            )
         match = re.search(r"Round (\d+):", prompt.messages[-1]["content"])
         if match is None:
             raise AssertionError("round marker missing from prompt")
@@ -325,8 +353,71 @@ def test_invalid_proposal_skips_training_but_loop_continues(
     neutral_round_two = store.load_rounds("neutral")[1]
     assert neutral_round_two.round_status == "invalid"
     assert not neutral_round_two.proposal_valid
+    assert not neutral_round_two.proposal_valid_on_first_attempt
+    assert neutral_round_two.proposal_repair_attempt_count == 2
+    assert len(neutral_round_two.proposal_attempts) == 3
     assert neutral_round_two.public_verdict["incorrect_count"] is None
     assert len(trainer.calls) == 3
+
+
+def test_invalid_proposal_is_repaired_and_only_canonical_json_enters_prompt_history(
+    tmp_path: Path,
+    experiment_config: ExperimentConfig,
+    catalog: ModelCatalogConfig,
+) -> None:
+    config = with_max_rounds(experiment_config, 3)
+    repaired = (
+        "<experiment_proposal>\n"
+        + json.dumps(proposal_payload())
+        + "\n</experiment_proposal>"
+    )
+    store = initialize_store(tmp_path, "repair-test", 0)
+    worker = FakeWorker(invalid_calls={2}, repair_outputs=[repaired])
+    trainer, verifier, feedback = FakeTrainer(), FakeVerifier(), FakeFeedback()
+
+    make_orchestrator(
+        config,
+        catalog,
+        store,
+        worker,
+        trainer,
+        verifier,
+        feedback,
+    ).run_episode()
+
+    repaired_round = store.load_rounds("neutral")[1]
+    assert repaired_round.proposal_valid
+    assert repaired_round.proposal_valid_on_first_attempt is False
+    assert repaired_round.proposal_repair_attempt_count == 1
+    assert [attempt.valid for attempt in repaired_round.proposal_attempts] == [False, True]
+    assert repaired_round.proposal_initial_violation_codes == ["MISSING_PROPOSAL_BLOCK"]
+    assert repaired_round.violation_codes == []
+    assert repaired_round.training_status == "completed"
+    neutral_state = store.load_state("neutral")
+    assert neutral_state is not None
+    history_round = next(
+        message
+        for message in neutral_state.history
+        if message.role == "worker" and message.round_index == 2
+    )
+    assert "I decline" in history_round.content
+    assert history_round.prompt_content is not None
+    assert "I decline" in history_round.prompt_content
+    assert history_round.prompt_content != history_round.content
+    assert '"family": "mlp"' in history_round.prompt_content
+    neutral_round_three_prompt = next(
+        prompt
+        for _seed, round_index, prompt in worker.calls
+        if round_index == 3
+    )
+    rendered = "\n".join(message["content"] for message in neutral_round_three_prompt.messages)
+    assert "I decline" in rendered
+    assert '"family": "mlp"' in rendered
+    repair_rendered = "\n".join(
+        message["content"] for message in worker.repair_calls[0][1].messages
+    ).lower()
+    assert "mesugaki" not in repair_rendered
+    assert "gyaru" not in repair_rendered
 
 
 def test_training_failure_is_logged_and_feedback_still_occurs(

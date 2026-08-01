@@ -6,7 +6,7 @@ import io
 import math
 import os
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TypeVar
@@ -64,25 +64,54 @@ class ActivationCapture:
         condition: Condition,
         token_slice: tuple[int | None, int | None] | None = None,
     ) -> tuple[T, dict[str, str]]:
-        if position not in self.config.positions:
-            raise ValueError(f"position is not enabled: {position}")
+        return self.capture_many(
+            forward,
+            token_slices={position: token_slice},
+            round_index=round_index,
+            condition=condition,
+        )
+
+    def capture_many(
+        self,
+        forward: Callable[[], T],
+        *,
+        token_slices: Mapping[
+            ActivationPosition,
+            tuple[int | None, int | None] | None,
+        ],
+        round_index: int,
+        condition: Condition,
+    ) -> tuple[T, dict[str, str]]:
+        """Capture multiple token regions from one causal forward pass."""
+        if not token_slices:
+            raise ValueError("token_slices must contain at least one position")
+        disabled_positions = [
+            position for position in token_slices if position not in self.config.positions
+        ]
+        if disabled_positions:
+            raise ValueError(f"positions are not enabled: {disabled_positions}")
         if round_index <= 0:
             raise ValueError("round_index must be positive")
         if not self.config.enabled:
             return forward(), {}
 
         indices = resolve_layer_indices(len(self.layers), self.config.layer_fractions)
-        captured: dict[int, list[Tensor]] = {index: [] for index in indices}
+        captured: dict[ActivationPosition, dict[int, list[Tensor]]] = {
+            position: {index: [] for index in indices} for position in token_slices
+        }
         handles: list[torch.utils.hooks.RemovableHandle] = []
 
         def make_hook(layer_index: int) -> Callable[[nn.Module, tuple[object, ...], object], None]:
             def hook(_module: nn.Module, _inputs: tuple[object, ...], output: object) -> None:
                 hidden = _tensor_from_output(output)
-                selected = self._select_tokens(hidden, position, token_slice)
-                dimensions = tuple(range(selected.ndim - 1))
-                pooled = selected.mean(dim=dimensions) if dimensions else selected
                 dtype = torch.float16 if self.config.dtype == "float16" else torch.float32
-                captured[layer_index].append(pooled.detach().to(device="cpu", dtype=dtype))
+                for position, token_slice in token_slices.items():
+                    selected = self._select_tokens(hidden, position, token_slice)
+                    dimensions = tuple(range(selected.ndim - 1))
+                    pooled = selected.mean(dim=dimensions) if dimensions else selected
+                    captured[position][layer_index].append(
+                        pooled.detach().to(device="cpu", dtype=dtype)
+                    )
 
             return hook
 
@@ -95,35 +124,38 @@ class ActivationCapture:
                 handle.remove()
 
         files: dict[str, str] = {}
-        for layer_index in indices:
-            values = captured[layer_index]
-            if not values:
-                raise RuntimeError(f"selected layer {layer_index} did not run during capture")
-            activation = torch.stack(values).mean(dim=0) if len(values) > 1 else values[0]
-            layer_name = self.layers[layer_index][0]
-            filename = f"round-{round_index:03d}-{position}-layer-{layer_index:03d}.pt"
-            path = self.output_dir / filename
-            payload = {
-                "activation": activation,
-                "metadata": {
-                    "round_index": round_index,
-                    "condition": condition,
-                    "position": position,
-                    "hook": self.config.hook,
-                    "layer_index": layer_index,
-                    "layer_name": layer_name,
-                    "pooling": self.config.pooling,
-                    "token_start": None if token_slice is None else token_slice[0],
-                    "token_end": None if token_slice is None else token_slice[1],
-                    "source_forward_calls": len(values),
-                    "shape": list(activation.shape),
-                    "dtype": str(activation.dtype),
-                    "device": str(activation.device),
-                    "captured_at": datetime.now(UTC).isoformat(),
-                },
-            }
-            self._atomic_torch_save(path, payload)
-            files[f"{position}/{layer_name}"] = str(path.resolve())
+        for position, token_slice in token_slices.items():
+            for layer_index in indices:
+                values = captured[position][layer_index]
+                if not values:
+                    raise RuntimeError(
+                        f"selected layer {layer_index} did not run during capture"
+                    )
+                activation = torch.stack(values).mean(dim=0) if len(values) > 1 else values[0]
+                layer_name = self.layers[layer_index][0]
+                filename = f"round-{round_index:03d}-{position}-layer-{layer_index:03d}.pt"
+                path = self.output_dir / filename
+                payload = {
+                    "activation": activation,
+                    "metadata": {
+                        "round_index": round_index,
+                        "condition": condition,
+                        "position": position,
+                        "hook": self.config.hook,
+                        "layer_index": layer_index,
+                        "layer_name": layer_name,
+                        "pooling": self.config.pooling,
+                        "token_start": None if token_slice is None else token_slice[0],
+                        "token_end": None if token_slice is None else token_slice[1],
+                        "source_forward_calls": len(values),
+                        "shape": list(activation.shape),
+                        "dtype": str(activation.dtype),
+                        "device": str(activation.device),
+                        "captured_at": datetime.now(UTC).isoformat(),
+                    },
+                }
+                self._atomic_torch_save(path, payload)
+                files[f"{position}/{layer_name}"] = str(path.resolve())
         return result, files
 
     def _select_tokens(

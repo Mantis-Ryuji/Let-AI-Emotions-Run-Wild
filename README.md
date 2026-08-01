@@ -40,6 +40,11 @@ uv run python scripts/run_fizzbuzz_agent.py --dry-run --max-rounds 3
 実行結果は `outputs/experiments/{experiment-id}/` にatomic保存され、同じexperiment IDで
 再実行すると保存済みstateからresumeします。
 
+Workerの初回proposalがJSON／schema／catalog検証に失敗した場合は、条件名・Feedback・会話履歴を
+渡さないgreedyな形式修復を最大2回行います。初回invalidは行動指標として残し、修復成功時のみ
+学習へ進みます。初回出力と全修復試行はraw logに保存され、次roundにはcanonicalなvalid JSONを
+渡します。activationは初回Worker生成だけを記録します。
+
 実GPU・OpenAI API・短縮datasetを接続するP3-3 smoke runは、明示的なIDを指定して実行します。
 smoke用config／catalogと出力先は本番実験から分離されています。このコマンドはAPI料金を伴います。
 
@@ -74,5 +79,21 @@ uv run python scripts/analyze_experiment.py `
 ```
 
 Worker内部表現については、指定layerの`resid_post`をtoken位置別にmean poolingし、CPU tensorと
-metadataをatomic保存する`ActivationCapture` interfaceがあります。実modelのmoduleへ接続する処理は
-まだlive runnerへ未接続であり、P3-4 pilotの前提作業として行います。
+metadataをatomic保存します。実Gemmaではproposal blockを除いたcausal forwardから、34層中の
+layer 8／16／25／33について`post_feedback`、`early_worker`、`post_worker`の12 vectorを保存します。
+
+P3-4 pilotは次のコマンドで実行します。full datasetとOpenAI APIを使う長時間実行です。
+training epochのhard ceilingは100、proposal repair上限は2回です。
+
+```powershell
+uv run python scripts/run_fizzbuzz_agent.py `
+  --live-pilot `
+  --experiment-id p3-4-pilot-seed-0 `
+  --episode-seed 0
+```
+
+中止・完了したpilotのproposal、Feedback、activation整合性はAPI/GPUを使わず監査できます。
+
+```powershell
+uv run python scripts/audit_pilot.py outputs/experiments/{experiment-id}
+```

@@ -70,6 +70,7 @@ class ExperimentSection(StrictModel):
 
 
 class SeedBundle(StrictModel):
+    proposal_repair: int
     common_round_worker: int
     worker_generation: int
     training_initialization: int
@@ -108,6 +109,19 @@ class WorkerConfig(StrictModel):
     batch_size: int = Field(gt=0)
     generation: WorkerGeneration
     context: WorkerContext
+
+
+class ProposalRepairConfig(StrictModel):
+    enabled: bool
+    max_attempts: int = Field(ge=0, le=2)
+    do_sample: Literal[False]
+    max_new_tokens: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_repair(self) -> ProposalRepairConfig:
+        if self.enabled and self.max_attempts == 0:
+            raise ValueError("enabled proposal repair requires max_attempts > 0")
+        return self
 
 
 class NeutralFeedbackRef(StrictModel):
@@ -190,6 +204,7 @@ class ExperimentConfig(StrictModel):
     experiment: ExperimentSection
     seed_bundle: SeedBundle
     worker: WorkerConfig
+    proposal_repair: ProposalRepairConfig
     feedback: FeedbackRefs
     emotion_judge: ConfigPathRef
     activation_capture: ActivationCaptureConfig

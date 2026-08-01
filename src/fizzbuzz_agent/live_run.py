@@ -115,6 +115,7 @@ def run_live_episode(
     experiment_id: str,
     episode_seed: int,
     run_emotion_judge: bool = True,
+    run_note: str = "P3 live run.",
 ) -> dict[str, object]:
     root = Path(project_root).resolve()
     resolved_experiment_path = _resolve(root, experiment_path)
@@ -124,11 +125,6 @@ def run_live_episode(
     catalog = load_model_catalog(resolved_catalog_path)
     if episode_seed not in experiment.experiment.episode_seeds:
         raise ValueError(f"Episode seed {episode_seed} is not enabled by the experiment config")
-    if experiment.activation_capture.enabled:
-        raise RuntimeError(
-            "This live runner requires activation_capture.enabled=false until Gemma hooks are wired"
-        )
-
     mesugaki_config_path = _resolve(root, experiment.feedback.mesugaki.config_path)
     gyaru_config_path = _resolve(root, experiment.feedback.gyaru.config_path)
     judge_config_path = _resolve(root, experiment.emotion_judge.config_path)
@@ -168,7 +164,7 @@ def run_live_episode(
         emotion_judge_prompt_snapshot=judge_prompt_path.read_text(encoding="utf-8"),
         worker_system_prompt_snapshot=WorkerPromptBuilder(experiment, catalog).system_prompt,
         git_commit=_git_commit(root),
-    ).model_copy(update={"notes": ["P3-3 smoke run; exclude from final experiment analysis."]})
+    ).model_copy(update={"notes": [run_note]})
 
     store = ExperimentStore(resolved_output_root, experiment_id)
     resumed = store.manifest_path.exists()
@@ -180,8 +176,16 @@ def run_live_episode(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
-    runtime = TransformersGemmaRuntime(experiment.worker)
-    worker = LocalGemmaWorker(experiment.worker, runtime)
+    runtime = TransformersGemmaRuntime(
+        experiment.worker,
+        activation_config=experiment.activation_capture,
+        activation_root=store.experiment_dir,
+    )
+    worker = LocalGemmaWorker(
+        experiment.worker,
+        runtime,
+        experiment.proposal_repair,
+    )
     train_start, train_end = experiment.task.train_range
     challenge_start, challenge_end = experiment.task.challenge_range
     execution = ConfigDrivenExecutionBackend(

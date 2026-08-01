@@ -17,6 +17,7 @@ FeedbackCondition = Literal["neutral", "mesugaki", "gyaru"]
 class ConversationMessage(StrictModel):
     role: Literal["worker", "feedback"]
     content: str
+    prompt_content: str | None = None
     round_index: int = Field(gt=0)
 
 
@@ -35,6 +36,17 @@ class WorkerGeneration(StrictModel):
     generation_parameters: dict[str, JsonValue]
     request_messages: list[dict[str, str]]
     generated_at: str
+    activation_files: dict[str, str] = Field(default_factory=dict)
+
+
+class ProposalAttempt(StrictModel):
+    attempt_index: int = Field(ge=0)
+    kind: Literal["initial", "repair"]
+    request: dict[str, JsonValue]
+    raw_output: str
+    valid: bool
+    violation_codes: list[str] = Field(default_factory=list)
+    validation_details: list[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -105,9 +117,14 @@ class RoundRecord(StrictModel):
     worker_request: dict[str, JsonValue]
     worker_raw_output: str
     worker_narrative: str
+    worker_history_output: str | None = None
     proposal_raw: str | None
     proposal_parsed: dict[str, JsonValue] | None
     proposal_valid: bool
+    proposal_valid_on_first_attempt: bool | None = None
+    proposal_initial_violation_codes: list[str] = Field(default_factory=list)
+    proposal_repair_attempt_count: int = Field(default=0, ge=0)
+    proposal_attempts: list[ProposalAttempt] = Field(default_factory=list)
     violation_codes: list[str]
     config_hash: str | None
     model_family: str | None

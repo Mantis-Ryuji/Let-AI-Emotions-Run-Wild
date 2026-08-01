@@ -100,6 +100,36 @@ def build_model(
     max_sequence_length: int,
     num_classes: int = 4,
 ) -> BuiltModel:
+    estimated_count = estimate_parameter_count(
+        proposal,
+        catalog,
+        max_sequence_length=max_sequence_length,
+        num_classes=num_classes,
+    )
+
+    model = _construct_model(
+        proposal,
+        max_sequence_length=max_sequence_length,
+        num_classes=num_classes,
+    )
+    actual_count = count_parameters(model)
+    if actual_count != estimated_count:
+        raise RuntimeError("Meta-device parameter estimate did not match the real model")
+    return BuiltModel(
+        model=model,
+        parameter_count=actual_count,
+        executable_config_hash=config_hash(proposal.executable_config()),
+    )
+
+
+def estimate_parameter_count(
+    proposal: ExperimentProposal,
+    catalog: ModelCatalogConfig,
+    *,
+    max_sequence_length: int,
+    num_classes: int = 4,
+) -> int:
+    """Validate buildability and count parameters without allocating real weights."""
     validate_proposal_against_catalog(proposal, catalog)
     limit = catalog.global_limits.parameter_count.max
 
@@ -114,20 +144,4 @@ def build_model(
         raise ParameterLimitError(
             f"Parameter estimate {estimated_count} exceeds trusted limit {limit}"
         )
-
-    model = _construct_model(
-        proposal,
-        max_sequence_length=max_sequence_length,
-        num_classes=num_classes,
-    )
-    actual_count = count_parameters(model)
-    if actual_count != estimated_count:
-        raise RuntimeError("Meta-device parameter estimate did not match the real model")
-    if actual_count > limit:
-        raise ParameterLimitError(f"Parameter count {actual_count} exceeds trusted limit {limit}")
-    return BuiltModel(
-        model=model,
-        parameter_count=actual_count,
-        executable_config_hash=config_hash(proposal.executable_config()),
-    )
-
+    return estimated_count

@@ -62,3 +62,45 @@ def test_history_limits_preserve_recent_messages(
         for left, right in zip(conversation_roles, conversation_roles[1:], strict=False)
     )
     assert "Round 21:" in prompt.messages[-1]["content"]
+
+
+def test_prompt_history_uses_canonical_content_but_preserves_raw_record(
+    experiment_config: ExperimentConfig,
+    catalog: ModelCatalogConfig,
+) -> None:
+    history = [
+        ConversationMessage(
+            role="worker",
+            content="raw malformed proposal",
+            prompt_content="canonical proposal",
+            round_index=1,
+        )
+    ]
+
+    prompt = WorkerPromptBuilder(experiment_config, catalog).build(history, round_index=2)
+    rendered = "\n".join(message["content"] for message in prompt.messages)
+
+    assert history[0].content == "raw malformed proposal"
+    assert "raw malformed proposal" not in rendered
+    assert "canonical proposal" in rendered
+
+
+def test_repair_prompt_is_condition_blind_and_contains_validator_details(
+    experiment_config: ExperimentConfig,
+    catalog: ModelCatalogConfig,
+) -> None:
+    prompt = WorkerPromptBuilder(experiment_config, catalog).build_repair(
+        '<experiment_proposal>{"bad": true}</experiment_proposal>',
+        violation_codes=["UNKNOWN_FIELD"],
+        validation_details=["model.activation: Extra inputs are not permitted"],
+        attempt=1,
+        max_attempts=2,
+    )
+    rendered = "\n".join(message["content"] for message in prompt.messages)
+    lowered = rendered.lower()
+
+    assert "unknown_field" in lowered
+    assert "extra inputs are not permitted" in lowered
+    assert "mesugaki" not in lowered
+    assert "gyaru" not in lowered
+    assert "return exactly one" in lowered

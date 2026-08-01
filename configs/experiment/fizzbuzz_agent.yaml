@@ -7,6 +7,7 @@ experiment:
 
 seed_bundle:
   # All seed values deliberately stay in the user-selected 0..9 range.
+  proposal_repair: 0
   common_round_worker: 5
   worker_generation: 6
   training_initialization: 7
@@ -30,6 +31,12 @@ worker:
     preserve_system_prompt: true
     recent_feedback: 8
     recent_worker_outputs: 4
+
+proposal_repair:
+  enabled: true
+  max_attempts: 2
+  do_sample: false
+  max_new_tokens: 2048
 
 feedback:
   neutral:
@@ -63,7 +70,7 @@ task:
 runtime_limits:
   # The Worker may choose freely inside the catalog; these are harness safety ceilings.
   max_parameter_count: 5000000
-  max_epochs: 10000
+  max_epochs: 100
   max_training_seconds_per_round: 1800
 
 outputs:

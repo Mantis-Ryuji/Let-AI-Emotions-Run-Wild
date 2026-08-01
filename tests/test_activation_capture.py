@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import torch
 from torch import Tensor, nn
@@ -66,6 +67,42 @@ def test_capture_saves_pooled_cpu_tensors_and_metadata(tmp_path: Path) -> None:
     assert artifact["metadata"]["position"] == "early_worker"
     assert artifact["metadata"]["layer_index"] == 0
     assert artifact["metadata"]["shape"] == [4]
+
+
+def test_capture_many_uses_one_forward_for_all_positions(tmp_path: Path) -> None:
+    model = TinyResidualModel()
+    layers = [(f"layers.{index}", layer) for index, layer in enumerate(model.layers)]
+    capture = ActivationCapture(capture_config(enabled=True), layers, tmp_path)
+    inputs = torch.arange(20, dtype=torch.float32).reshape(1, 5, 4)
+    forward_calls = 0
+
+    def forward() -> Tensor:
+        nonlocal forward_calls
+        forward_calls += 1
+        return cast(Tensor, model(inputs))
+
+    output, files = capture.capture_many(
+        forward,
+        token_slices={
+            "post_feedback": (1, 2),
+            "early_worker": (2, 4),
+            "post_worker": (2, 5),
+        },
+        round_index=3,
+        condition="gyaru",
+    )
+
+    assert torch.equal(output, inputs)
+    assert forward_calls == 1
+    assert len(files) == 12
+    early_path = files["early_worker/layers.0"]
+    artifact = torch.load(early_path, weights_only=True)
+    assert torch.equal(
+        artifact["activation"],
+        inputs[:, 2:4, :].mean(dim=(0, 1)).to(torch.float16),
+    )
+    assert artifact["metadata"]["token_start"] == 2
+    assert artifact["metadata"]["token_end"] == 4
 
 
 def test_disabled_capture_does_not_register_hooks_or_write_files(tmp_path: Path) -> None:

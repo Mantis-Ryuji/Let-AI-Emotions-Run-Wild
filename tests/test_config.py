@@ -24,6 +24,11 @@ def test_load_project_configs() -> None:
     assert experiment.task.max_sequence_length == 6
     assert experiment.activation_capture.layer_fractions == [0.25, 0.5, 0.75, 1.0]
     assert experiment.activation_capture.hook == "resid_post"
+    assert experiment.proposal_repair.enabled
+    assert experiment.proposal_repair.max_attempts == 2
+    assert experiment.proposal_repair.do_sample is False
+    assert experiment.runtime_limits.max_epochs == 100
+    assert catalog.training.epochs.max == 100
     assert catalog.transformer_encoder.positional_encoding.allowed == ["learned", "none"]
     assert "sinusoidal" in catalog.transformer_encoder.positional_encoding.forbidden
 
@@ -35,6 +40,8 @@ def test_load_smoke_configs() -> None:
     assert experiment.experiment.episode_seeds == [0]
     assert experiment.experiment.max_rounds == 2
     assert not experiment.activation_capture.enabled
+    assert experiment.proposal_repair.enabled
+    assert experiment.proposal_repair.max_attempts == 2
     assert experiment.outputs.root == "outputs/smoke"
     assert catalog.training.epochs.max == 3
     assert catalog.global_limits.parameter_count.max == 250000

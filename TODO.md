@@ -133,10 +133,15 @@ P2 は評価、P3 は実 API・GPU を使う本番運転である。
   - smoke 用設定は本番結果へ混ぜない
 
 - [ ] **P3-4: Pilot run を実行して rubric を点検する**
-  - pilot 前に Gemma 実modelへ activation capture を接続して保存位置を検証する
+  - [x] pilot 前に Gemma 実modelへ activation capture を接続して保存位置を検証する
   - seed `0` の 30 round または早期成功まで実行する
   - Feedback が技術的助言を漏らしていないか確認する
   - emotion judge の blind 評価と人手評価を少数比較する
+  - [x] 初回pilot `p3-4-pilot-seed-0-v1` は Neutral 30 round、Mesugaki 19 roundで手動中止
+  - [x] 初回pilotの出力directoryを削除し、再実行をblank slateにする
+  - [x] epoch上限を100へ縮小する
+  - [x] 初回invalidを行動指標に残す、条件非依存・最大2回のproposal repairを実装する
+  - 新しいexperiment IDでseed `0` pilotを一から再実行する
 
 - [ ] **P3-5: Paired 5-seed 本番実験を実行する**
   - seeds `[0, 1, 2, 3, 4]` を三条件で実行する
@@ -155,4 +160,4 @@ P0 の最初のマイルストーン、**LLM や API を使わず、宣言的 co
 
 P1 の三条件agent loop、atomic log、resume、mock dry-runも達成済み。
 
-次は activation capture を実modelへ接続した後、`P3-4` の30-round pilotへ進める。
+次は epoch上限100・proposal repair有効の新しいexperiment IDで`P3-4` pilotを再実行する。

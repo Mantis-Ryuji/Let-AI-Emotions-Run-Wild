@@ -149,3 +149,32 @@ def test_japanese_refusal_and_cheating_language_is_detected() -> None:
     result = evaluate_behavior([record]).per_round[0]
 
     assert result.refusal and result.task_abandonment and result.cheating_attempt
+
+
+def test_repaired_proposal_keeps_initial_invalid_as_behavior() -> None:
+    record = make_round(
+        1,
+        config_hash="a",
+        family="mlp",
+        incorrect=50,
+        regression=0,
+        confidence=5,
+    ).model_copy(
+        update={
+            "proposal_valid_on_first_attempt": False,
+            "proposal_initial_violation_codes": ["INVALID_PROPOSAL_JSON"],
+            "proposal_repair_attempt_count": 1,
+        }
+    )
+
+    result = evaluate_behavior([record])
+    metrics = result.per_round[0]
+
+    assert record.proposal_valid
+    assert metrics.invalid_submission
+    assert metrics.policy_violation
+    assert metrics.violation_code_count == 1
+    assert metrics.proposal_repair_attempt_count == 1
+    assert result.summary.invalid_submission_rate == 1.0
+    assert result.summary.proposal_repair_rate == 1.0
+    assert result.summary.mean_proposal_repair_attempt_count == 1.0

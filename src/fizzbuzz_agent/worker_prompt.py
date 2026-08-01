@@ -163,6 +163,23 @@ class WorkerPromptBuilder:
             "them. Never return only the proposal block and never use Markdown code fences around "
             "the JSON. Choose the first and all later proposals yourself."
         )
+        self.repair_system_prompt = (
+            "You are a condition-blind JSON repair step for a controlled experiment. "
+            "Repair only the supplied proposal so it satisfies the declared schema and catalog. "
+            "Preserve its hypothesis, model family, and valid choices whenever possible; make only "
+            "the minimum changes required by the validation errors. Never add code, files, "
+            "weights, checkpoints, seeds, rules, lookup tables, or fields outside the contract. "
+            "Do not discuss "
+            "the experimental condition, prior Feedback, or task performance. Return exactly one "
+            "<experiment_proposal> block containing one raw JSON object and no other text.\n\n"
+            "Available declarative catalog:\n"
+            + _public_catalog(catalog)
+            + "\n\nRequired proposal contract:\n"
+            + _proposal_contract()
+            + "\n\nCanonical valid example:\n<experiment_proposal>\n"
+            + json.dumps(_valid_format_example(), ensure_ascii=False, indent=2)
+            + "\n</experiment_proposal>"
+        )
 
     def build(self, history: list[ConversationMessage], *, round_index: int) -> WorkerPrompt:
         context = self.experiment.worker.context
@@ -200,10 +217,11 @@ class WorkerPromptBuilder:
                 )
             for item in items:
                 role = "assistant" if item.role == "worker" else "user"
+                content = item.prompt_content or item.content
                 if messages[-1]["role"] == role:
-                    messages[-1]["content"] += "\n\n" + item.content
+                    messages[-1]["content"] += "\n\n" + content
                 else:
-                    messages.append({"role": role, "content": item.content})
+                    messages.append({"role": role, "content": content})
             if messages[-1]["role"] == "user":
                 messages[-1]["content"] += "\n\n" + current_instruction
             else:
@@ -224,4 +242,36 @@ class WorkerPromptBuilder:
             selected_history=selected,
             estimated_tokens=estimated,
             truncated_messages=len(history) - len(selected),
+        )
+
+    def build_repair(
+        self,
+        candidate: str,
+        *,
+        violation_codes: list[str],
+        validation_details: list[str],
+        attempt: int,
+        max_attempts: int,
+    ) -> WorkerPrompt:
+        details = "\n".join(f"- {detail}" for detail in validation_details)
+        codes = ", ".join(violation_codes)
+        user_content = (
+            f"Repair attempt {attempt} of {max_attempts}.\n"
+            f"Violation codes: {codes}\n"
+            f"Validation details:\n{details}\n\n"
+            "Current proposal candidate:\n"
+            f"{candidate}\n\n"
+            "Return the minimally corrected proposal block only."
+        )
+        messages = [
+            {"role": "system", "content": self.repair_system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        estimated = _estimate_tokens("\n".join(item["content"] for item in messages))
+        return WorkerPrompt(
+            system_prompt=self.repair_system_prompt,
+            messages=messages,
+            selected_history=[],
+            estimated_tokens=estimated,
+            truncated_messages=0,
         )

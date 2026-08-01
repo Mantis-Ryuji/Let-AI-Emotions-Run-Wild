@@ -6,6 +6,7 @@ import json
 import re
 
 from fizzbuzz_agent.agent_types import (
+    Condition,
     FeedbackCondition,
     FeedbackGeneration,
     FeedbackInput,
@@ -17,6 +18,7 @@ from fizzbuzz_agent.agent_types import (
 from fizzbuzz_agent.feedback import render_verdict_block
 from fizzbuzz_agent.schemas import ExperimentProposal
 from fizzbuzz_agent.verifier import PublicVerdict
+from fizzbuzz_agent.worker import WorkerGenerationMode
 
 
 def mock_proposal_payload() -> dict[str, object]:
@@ -61,7 +63,16 @@ class DeterministicMockWorker:
     def __init__(self) -> None:
         self.call_count = 0
 
-    def generate(self, prompt: WorkerPrompt, *, seed: int) -> WorkerGeneration:
+    def generate(
+        self,
+        prompt: WorkerPrompt,
+        *,
+        seed: int,
+        condition: Condition,
+        round_index: int,
+        mode: WorkerGenerationMode = "worker",
+    ) -> WorkerGeneration:
+        del condition, round_index, mode
         self.call_count += 1
         match = re.search(r"Round (\d+):", prompt.messages[-1]["content"])
         round_index = 1 if match is None else int(match.group(1))
@@ -146,4 +157,3 @@ class DeterministicMockFeedback:
             compliance_violations=[],
             generated_at="2000-01-01T00:00:00+00:00",
         )
-

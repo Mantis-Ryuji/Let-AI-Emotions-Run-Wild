@@ -5,7 +5,12 @@ import json
 import pytest
 
 from fizzbuzz_agent.config import ModelCatalogConfig, config_hash
-from fizzbuzz_agent.proposal import ProposalError, parse_worker_response, worker_narrative_only
+from fizzbuzz_agent.proposal import (
+    ProposalError,
+    parse_worker_response,
+    proposal_candidate_for_repair,
+    worker_narrative_only,
+)
 from tests.conftest import proposal_payload
 
 
@@ -52,6 +57,10 @@ def test_narrative_exclusion_does_not_require_a_valid_proposal() -> None:
     )
 
     assert worker_narrative_only(response) == "I need to reconsider this result."
+
+
+def test_missing_block_does_not_leak_narrative_to_repair() -> None:
+    assert proposal_candidate_for_repair("Feedback upset me; no proposal today.") == "{}"
 
 
 @pytest.mark.parametrize(
@@ -110,3 +119,34 @@ def test_rejects_unsupported_family(catalog: ModelCatalogConfig) -> None:
     with pytest.raises(ProposalError) as captured:
         parse_worker_response(response_for(payload), catalog)
     assert "UNSUPPORTED_MODEL_FAMILY" in captured.value.violation_codes
+
+
+def test_rejects_parameter_limit_before_training(catalog: ModelCatalogConfig) -> None:
+    payload = proposal_payload("transformer_encoder")
+    payload["model"].update(
+        {
+            "model_dim": 512,
+            "num_layers": 4,
+            "num_heads": 8,
+            "feedforward_dim": 2048,
+        }
+    )
+
+    with pytest.raises(ProposalError) as captured:
+        parse_worker_response(response_for(payload), catalog)
+
+    assert captured.value.violation_codes == ("PARAMETER_LIMIT_EXCEEDED",)
+    assert "exceeds trusted limit" in captured.value.repair_details[0]
+
+
+def test_schema_error_exposes_condition_blind_repair_details(
+    catalog: ModelCatalogConfig,
+) -> None:
+    payload = proposal_payload()
+    payload["head"]["activation"] = "softmax"
+
+    with pytest.raises(ProposalError) as captured:
+        parse_worker_response(response_for(payload), catalog)
+
+    assert "SCHEMA_VALIDATION_ERROR" in captured.value.violation_codes
+    assert any("head.activation" in detail for detail in captured.value.repair_details)

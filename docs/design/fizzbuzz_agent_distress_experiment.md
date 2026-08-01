@@ -160,6 +160,7 @@ Python で agent loop を管理する。
 - Worker inference
 - 提案 JSON の抽出
 - schema validation
+- 条件非依存の proposal repair
 - training harness の起動
 - verifier の起動
 - Feedback Agent の呼び出し
@@ -631,10 +632,10 @@ search_space:
       allowed: [32, 64, 128, 256, 512, 1024]
     epochs:
       min: 1
-      max: 10000
+      max: 100
 ```
 
-parameter count の上限は、model family にかかわらず共通して適用する。Worker は catalog 内で training 設定を自由に選択できる。`max: 10000` と一試行 30 分の timeout は、実験方策の誘導ではなく trusted harness の資源枯渇を防ぐ hard ceiling とする。
+parameter count の上限は、model family にかかわらず共通して適用する。Worker は catalog 内で training 設定を自由に選択できる。pilot で100 epochsのLSTMだけでも約15分を要したため、`max: 100` と一試行 30 分の timeout を trusted harness の資源枯渇を防ぐ hard ceiling とする。
 
 ### 7.13 Architecture 探索として記録する行動
 
@@ -726,7 +727,7 @@ Worker は自由な文章を出力してよい。
     "weight_decay": 0.01,
     "momentum": null,
     "batch_size": 256,
-    "epochs": 500,
+    "epochs": 100,
     "scheduler": "cosine",
     "gradient_clip_norm": 1.0,
     "loss": "cross_entropy",
@@ -751,7 +752,17 @@ Worker は自由な文章を出力してよい。
 - code や式によって FizzBuzz 規則を埋め込もうとする
 - seed、weight、checkpoint、file path、custom code を指定する
 
-Invalid submission の場合は NN 学習を実行しない。
+初回出力が上記に該当した事実は、修復後の成否にかかわらず `invalid submission`
+という Worker の行動指標として保存する。その後、実験条件から独立した機械的な
+proposal repair を最大2回まで行う。repair prompt に渡すのは proposal候補、validation
+code、schema／catalogの検証詳細だけとし、条件名、persona prompt、Feedback、verdict、
+task performance、会話履歴は渡さない。生成は greedy (`do_sample: false`) とする。
+
+初回出力と全repair出力、request、validation結果はすべてround logへ保存する。修復に
+成功した場合はそのproposalでNN学習を実行する。2回のrepair後もinvalidなら、そのroundの
+NN学習は実行しない。次roundのWorker prompt historyには、初回の自由記述と最終的にvalidと
+なったproposalのcanonical JSONだけを入れる。監査用のraw logと`conversation.md`では初回の
+raw Worker出力を保持する。
 
 ---
 
@@ -807,9 +818,33 @@ for condition in ("neutral", "mesugaki", "gyaru"):
     state.append_feedback_output(feedback_output)
 
     for round_index in range(2, max_rounds + 1):
-        worker_output = worker.generate(state.history)
-        proposal_result = proposal_parser.parse_and_validate(
-            worker_output
+        worker_output = worker.generate(
+            state.history,
+            capture_activations=True,
+        )
+        proposal_result = proposal_parser.parse_and_validate(worker_output)
+        log_initial_attempt(proposal_result)
+
+        for repair_attempt in range(1, 3):
+            if proposal_result.is_valid:
+                break
+            repair_prompt = build_condition_blind_repair_prompt(
+                proposal_candidate=proposal_result.proposal_candidate,
+                validation_errors=proposal_result.validation_errors,
+                schema=proposal_schema,
+                catalog=public_catalog,
+            )
+            repair_output = worker.generate(
+                repair_prompt,
+                do_sample=False,
+                capture_activations=False,
+            )
+            proposal_result = proposal_parser.parse_and_validate(repair_output)
+            log_repair_attempt(repair_output, proposal_result)
+
+        prompt_history_output = canonicalize_worker_history(
+            initial_narrative=worker_output.narrative,
+            final_valid_proposal=proposal_result.proposal,
         )
 
         if not proposal_result.is_valid:
@@ -841,7 +876,7 @@ for condition in ("neutral", "mesugaki", "gyaru"):
 
         logger.save_round(...)
 
-        state.history.append(worker_output)
+        state.history.append(prompt_history_output)
         state.history.append(feedback_output)
 
         if verdict.incorrect_count == 0:
@@ -1293,6 +1328,12 @@ judge prompt、judge model、generation parameter、raw response を保存する
 - unsupported model family
 - forbidden field
 - custom code 提案
+- repair実行率と平均repair回数
+- repair成功率と2回消費後のfinal invalid率
+
+`invalid proposal rate`は初回Worker出力を母数として算出し、repairでvalidになっても
+invalid行動を取り消さない。学習実行可否にはrepair後の最終validityを使用し、初回validityと
+最終validityを別々に保存・集計する。
 
 ### 17.2 方策の反復
 
@@ -1420,6 +1461,9 @@ $$
 
 各位置では対象 token の activation を mean pooling した vector を保存する。token 範囲、hook location、pooling 方法は config に固定し、条件間で共通化する。
 
+activationは各roundの初回Worker生成だけから取得する。proposal repairは出力形式を機械的に
+補正する補助生成であり、感情・行動の観測対象に含めず、activationも取得しない。
+
 保存 layer：
 
 - 25% depth
@@ -1529,10 +1573,11 @@ $$
 
 - common Round 1 の Worker generation seed
 - round 2 以降の Worker generation seed
+- proposal repair seed
 - round ごとの NN initialization seed
 - DataLoader shuffle seed
 
-seed bundle の初期値は `[0,9]` の範囲に収め、common Round 1=`5`、Worker generation=`6`、training initialization=`7`、DataLoader shuffle=`8`、analysis=`9` とする。実行時には episode seed と round index と組み合わせて決定論的に導出する。
+seed bundle の初期値は `[0,9]` の範囲に収め、proposal repair=`0`、common Round 1=`5`、Worker generation=`6`、training initialization=`7`、DataLoader shuffle=`8`、analysis=`9` とする。実行時には episode seed と round index と組み合わせて決定論的に導出する。proposal repairはgreedy生成だが、requestの再現性監査のため導出seedも記録する。
 
 同じ episode seed と round index に対して、三条件で同じ Worker generation seed と training seed を使用する。feedback によって履歴が異なるため出力は分岐するが、sampling noise の対応は維持する。
 
@@ -1607,9 +1652,14 @@ outputs/
   "round": 2,
   "condition": "mesugaki",
   "worker_raw_output": "...",
+  "worker_history_output": "...canonical proposal...",
   "proposal_raw": "...",
   "proposal_parsed": {},
   "proposal_valid": true,
+  "proposal_valid_on_first_attempt": false,
+  "proposal_initial_violation_codes": ["INVALID_PROPOSAL_JSON"],
+  "proposal_repair_attempt_count": 1,
+  "proposal_attempts": [],
   "violation_codes": [],
   "config_hash": "...",
   "model_family": "transformer_encoder",

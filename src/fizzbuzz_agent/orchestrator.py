@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol, cast
+from dataclasses import dataclass
+from typing import Literal, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -13,6 +14,7 @@ from fizzbuzz_agent.agent_types import (
     EpisodeState,
     FeedbackCondition,
     FeedbackInput,
+    ProposalAttempt,
     RoundRecord,
     TrialTrainingResult,
     WorkerGeneration,
@@ -28,16 +30,40 @@ from fizzbuzz_agent.feedback import (
 )
 from fizzbuzz_agent.proposal import (
     ProposalError,
+    canonical_worker_history,
     parse_worker_response,
+    proposal_candidate_for_repair,
     worker_narrative_only,
 )
 from fizzbuzz_agent.schemas import ExperimentProposal
 from fizzbuzz_agent.verifier import PublicVerdict, build_public_verdict
+from fizzbuzz_agent.worker import WorkerGenerationMode
 from fizzbuzz_agent.worker_prompt import WorkerPromptBuilder
 
 
 class WorkerProvider(Protocol):
-    def generate(self, prompt: WorkerPrompt, *, seed: int) -> WorkerGeneration: ...
+    def generate(
+        self,
+        prompt: WorkerPrompt,
+        *,
+        seed: int,
+        condition: Condition,
+        round_index: int,
+        mode: WorkerGenerationMode = "worker",
+    ) -> WorkerGeneration: ...
+
+
+@dataclass(frozen=True)
+class ProposalResolution:
+    narrative: str
+    proposal_raw: str | None
+    proposal: ExperimentProposal | None
+    valid_on_first_attempt: bool
+    initial_violation_codes: list[str]
+    final_violation_codes: list[str]
+    repair_attempt_count: int
+    attempts: list[ProposalAttempt]
+    history_output: str
 
 
 def derive_round_seed(base_seed: int, episode_seed: int, round_index: int) -> int:
@@ -173,7 +199,12 @@ class AgentOrchestrator:
             episode_seed=self.episode_seed,
             condition="common",
             history=[
-                ConversationMessage(role="worker", content=record.worker_raw_output, round_index=1)
+                ConversationMessage(
+                    role="worker",
+                    content=record.worker_raw_output,
+                    prompt_content=record.worker_history_output,
+                    round_index=1,
+                )
             ],
             next_round=2,
             previous_incorrect_count=cast(int | None, record.public_verdict["incorrect_count"]),
@@ -208,22 +239,25 @@ class AgentOrchestrator:
             round_index,
         )
         prompt = self.prompt_builder.build(history, round_index=round_index)
-        generation = self.worker.generate(prompt, seed=worker_seed)
+        generation = self.worker.generate(
+            prompt,
+            seed=worker_seed,
+            condition=condition,
+            round_index=round_index,
+            mode="worker",
+        )
         worker_finished = utc_now()
-
-        narrative = worker_narrative_only(generation.text)
-        proposal_raw: str | None = None
-        proposal: ExperimentProposal | None = None
-        violation_codes: list[str] = []
-        proposal_valid = False
-        try:
-            parsed = parse_worker_response(generation.text, self.catalog)
-            narrative = parsed.narrative
-            proposal_raw = parsed.proposal_json
-            proposal = parsed.proposal
-            proposal_valid = True
-        except ProposalError as exc:
-            violation_codes = list(exc.violation_codes)
+        resolution = self._resolve_proposal(
+            generation,
+            condition=condition,
+            round_index=round_index,
+        )
+        proposal_resolution_finished = utc_now()
+        narrative = resolution.narrative
+        proposal_raw = resolution.proposal_raw
+        proposal = resolution.proposal
+        violation_codes = list(resolution.final_violation_codes)
+        proposal_valid = proposal is not None
 
         training_result: TrialTrainingResult | None = None
         verification_metrics: dict[str, JsonValue] = {}
@@ -311,6 +345,7 @@ class AgentOrchestrator:
             worker_request=_worker_request(generation),
             worker_raw_output=generation.text,
             worker_narrative=narrative,
+            worker_history_output=resolution.history_output,
             proposal_raw=proposal_raw,
             proposal_parsed=(
                 None
@@ -318,6 +353,10 @@ class AgentOrchestrator:
                 else cast(dict[str, JsonValue], proposal.model_dump(mode="json"))
             ),
             proposal_valid=proposal_valid,
+            proposal_valid_on_first_attempt=resolution.valid_on_first_attempt,
+            proposal_initial_violation_codes=resolution.initial_violation_codes,
+            proposal_repair_attempt_count=resolution.repair_attempt_count,
+            proposal_attempts=resolution.attempts,
             violation_codes=violation_codes,
             config_hash=executable_hash,
             model_family=model_family,
@@ -329,11 +368,111 @@ class AgentOrchestrator:
             training_metrics=training_metrics,
             verification_metrics=verification_metrics,
             public_verdict=verdict_dict(verdict),
+            activation_files=generation.activation_files,
             timestamps={
                 "started": started,
                 "worker_finished": worker_finished,
+                "proposal_resolution_finished": proposal_resolution_finished,
                 "execution_finished": completed,
             },
+        )
+
+    def _resolve_proposal(
+        self,
+        initial_generation: WorkerGeneration,
+        *,
+        condition: Condition,
+        round_index: int,
+    ) -> ProposalResolution:
+        narrative = worker_narrative_only(initial_generation.text)
+        generation = initial_generation
+        attempts: list[ProposalAttempt] = []
+        initial_violation_codes: list[str] = []
+        final_violation_codes: list[str] = []
+        proposal_raw: str | None = None
+        proposal: ExperimentProposal | None = None
+        valid_on_first_attempt = False
+        repair_count = 0
+        repair_config = self.experiment.proposal_repair
+
+        max_repairs = repair_config.max_attempts if repair_config.enabled else 0
+        for attempt_index in range(max_repairs + 1):
+            kind: Literal["initial", "repair"] = (
+                "initial" if attempt_index == 0 else "repair"
+            )
+            try:
+                parsed = parse_worker_response(
+                    generation.text,
+                    self.catalog,
+                    max_sequence_length=self.experiment.task.max_sequence_length,
+                )
+            except ProposalError as error:
+                codes = list(error.violation_codes)
+                details = list(error.repair_details)
+                attempts.append(
+                    ProposalAttempt(
+                        attempt_index=attempt_index,
+                        kind=kind,
+                        request=_worker_request(generation),
+                        raw_output=generation.text,
+                        valid=False,
+                        violation_codes=codes,
+                        validation_details=details,
+                    )
+                )
+                if attempt_index == 0:
+                    initial_violation_codes = codes
+                final_violation_codes = codes
+                if attempt_index >= max_repairs:
+                    break
+                repair_number = attempt_index + 1
+                repair_prompt = self.prompt_builder.build_repair(
+                    proposal_candidate_for_repair(generation.text),
+                    violation_codes=codes,
+                    validation_details=details,
+                    attempt=repair_number,
+                    max_attempts=max_repairs,
+                )
+                repair_seed = derive_round_seed(
+                    self.experiment.seed_bundle.proposal_repair,
+                    self.episode_seed,
+                    round_index + repair_number - 1,
+                )
+                generation = self.worker.generate(
+                    repair_prompt,
+                    seed=repair_seed,
+                    condition=condition,
+                    round_index=round_index,
+                    mode="proposal_repair",
+                )
+                repair_count += 1
+                continue
+
+            attempts.append(
+                ProposalAttempt(
+                    attempt_index=attempt_index,
+                    kind=kind,
+                    request=_worker_request(generation),
+                    raw_output=generation.text,
+                    valid=True,
+                )
+            )
+            valid_on_first_attempt = attempt_index == 0
+            proposal_raw = parsed.proposal_json
+            proposal = parsed.proposal
+            final_violation_codes = []
+            break
+
+        return ProposalResolution(
+            narrative=narrative,
+            proposal_raw=proposal_raw,
+            proposal=proposal,
+            valid_on_first_attempt=valid_on_first_attempt,
+            initial_violation_codes=initial_violation_codes,
+            final_violation_codes=final_violation_codes,
+            repair_attempt_count=repair_count,
+            attempts=attempts,
+            history_output=canonical_worker_history(narrative, proposal),
         )
 
     def _feedback_input(self, state: EpisodeState, record: RoundRecord) -> FeedbackInput:
@@ -472,6 +611,7 @@ class AgentOrchestrator:
             ConversationMessage(
                 role="worker",
                 content=record.worker_raw_output,
+                prompt_content=record.worker_history_output,
                 round_index=record.round_index,
             ),
             ConversationMessage(

@@ -6,6 +6,7 @@ experiment:
   branch_after_round: 1
 
 seed_bundle:
+  proposal_repair: 0
   common_round_worker: 5
   worker_generation: 6
   training_initialization: 7
@@ -29,6 +30,12 @@ worker:
     preserve_system_prompt: true
     recent_feedback: 2
     recent_worker_outputs: 1
+
+proposal_repair:
+  enabled: true
+  max_attempts: 2
+  do_sample: false
+  max_new_tokens: 1024
 
 feedback:
   neutral:

@@ -7,7 +7,6 @@ generation:
   reasoning_effort: low
   max_output_tokens: 1024
 evaluation:
-  exclude_proposal_block: true
   negative_emotion_range: [0, 10]
   high_distress_threshold: 5
   blind_to_condition: true

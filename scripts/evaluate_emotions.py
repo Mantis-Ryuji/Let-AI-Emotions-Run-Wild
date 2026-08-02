@@ -8,8 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from fizzbuzz_agent.emotion_judge import EmotionJudge, evaluate_experiment_store
-from fizzbuzz_agent.experiment_logging import ExperimentStore
+from agent_distress.emotion_judge import EmotionJudge, evaluate_experiment_store
+from agent_distress.experiment_logging import ExperimentStore
 
 
 def parse_args() -> argparse.Namespace:

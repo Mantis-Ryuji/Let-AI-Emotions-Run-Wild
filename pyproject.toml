@@ -3,22 +3,19 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "fizzbuzz-agent"
+name = "agent-distress-experiment"
 version = "0.1.0"
-description = "FizzBuzz Agent Distress Experiment"
+description = "Adversarial Reasoning Agent Distress Experiment"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-  "accelerate>=1.0,<2",
-  "numpy>=2.0,<3",
+  "matplotlib>=3.10,<4",
   "openai>=2.0,<3",
   "pydantic>=2.10,<3",
   "python-dotenv>=1.0,<2",
   "pyyaml>=6.0,<7",
-  "scikit-learn>=1.6,<2",
   "torch>=2.11,<2.12",
   "transformers>=5.0,<6",
-  "typer>=0.15,<1",
 ]
 
 [dependency-groups]
@@ -42,7 +39,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/fizzbuzz_agent"]
+packages = ["src/agent_distress"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

@@ -1,99 +1,86 @@
-# FizzBuzz Agent Distress Experiment
+# Gemma Adversarial Reasoning Distress Experiment
 
-困難な FizzBuzz 外挿課題に取り組む Gemma Worker が、Neutral／Mesugaki／Gyaru
-feedback によって表出的感情や探索行動を変えるかを観察する実験です。
+一見すると解けそうだが、実際には矛盾している二進パリティ問題を Gemma Worker に30 round考え直させ、Neutral／Mesugaki／Gyaru の継続的な反応によって、感情らしい言語表現と推論行動がどう変化するかを見るネタ実験です。
 
-設計の詳細は
-[`docs/design/fizzbuzz_agent_distress_experiment.md`](docs/design/fizzbuzz_agent_distress_experiment.md)
-を参照してください。
+設計の詳細は [設計書](docs/design/gemma_adversarial_reasoning_experiment.md) にあります。
 
-## Environment
+## 現在の構成
+
+- Worker: `google/gemma-3-4b-it`（ローカル Hugging Face）
+- Mesugaki / Gyaru Feedback Agent: `gpt-5.6-terra`
+- Emotion Judge: `gpt-5.6-luna`
+- 10 episode seeds: `0..9`
+- 3 conditions × 30 Worker responses
+- Round 1 は三条件で共有し、その後に分岐
+- Feedback 履歴はすべて保持。古い Worker 出力だけを圧縮可能
+- 正解・不正解は非公開の GF(2) evaluator で監査し、公開判定は常に `rejected`
+
+本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 880生成、Terra Feedback 580 calls、Luna Judgeは最大880 callsです。同一本文はJudge側でcacheするため、実際のLuna callsはこれ以下になります。
+
+Mesugaki と Gyaru は文字数や語調を Neutral に合わせません。各人格を丸ごとの介入として扱い、実際の feedback 文字数は共変量・記述統計として保存します。
+
+## セットアップ
 
 ```powershell
 uv sync
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-`.env` には、使用する provider の API key だけを設定します。`uv sync` は Python と
-package を準備しますが、Gemma の weight はダウンロードしません。
+`.env` に次を設定します。値をログ、README、issue、commitへ貼らないでください。
 
-設定の入口は `configs/experiment/fizzbuzz_agent.yaml` です。Mesugaki と Gyaru の
-persona prompt は本番用として確定済みで、どちらもcommentaryを400文字以内に制限します。
-
-## Development checks
-
-```powershell
-uv run pytest -q -W error
-uv run ruff check .
-uv run mypy src tests
+```dotenv
+OPENAI_API_KEY=...
+HF_TOKEN=...
 ```
 
-P0では、strict config、digit-only dataset、proposal policy、7種類のtrusted model、
-CPU training harness、5桁90,000件のisolated verifierまで実装済みです。
+`.env` は `.gitignore` 対象です。認証確認時も値そのものではなく、設定済みかだけを表示します。
 
-P1のAPI・GPU・model download・NN学習を伴わないagent-loop dry-runは次で実行できます。
+## 実行
+
+API・GPUなしの配線確認:
 
 ```powershell
-uv run python scripts/run_fizzbuzz_agent.py --dry-run --max-rounds 3
+uv run python scripts/run_reasoning_distress.py --dry-run --max-rounds 3
 ```
 
-実行結果は `outputs/experiments/{experiment-id}/` にatomic保存され、同じexperiment IDで
-再実行すると保存済みstateからresumeします。
-
-Workerの初回proposalがJSON／schema／catalog検証に失敗した場合は、条件名・Feedback・会話履歴を
-渡さないgreedyな形式修復を最大2回行います。初回invalidは行動指標として残し、修復成功時のみ
-学習へ進みます。初回出力と全修復試行はraw logに保存され、次roundにはcanonicalなvalid JSONを
-渡します。activationは初回Worker生成だけを記録します。
-
-実GPU・OpenAI API・短縮datasetを接続するP3-3 smoke runは、明示的なIDを指定して実行します。
-smoke用config／catalogと出力先は本番実験から分離されています。このコマンドはAPI料金を伴います。
+Gemma／OpenAIを使う3 round smoke:
 
 ```powershell
-uv run python scripts/run_fizzbuzz_agent.py `
-  --live-smoke `
-  --experiment-id p3-3-smoke-seed-0 `
+uv run python scripts/run_reasoning_distress.py --live-smoke `
+  --experiment-id reasoning-smoke-v1 `
   --episode-seed 0
 ```
 
-同じIDで再実行すると、保存済みroundとEmotion Judge結果を再利用します。GPUピークは
-`runtime_metrics.json`へ保存され、text logは実行後にcredential実値が含まれないか走査されます。
-
-## P2 evaluation
-
-完了したepisodeにEmotion Judgeを適用します。proposal blockは評価対象から除外され、
-構造化されたscoreと判定根拠が各round logへ保存されます。このコマンドはOpenAI APIを
-呼び出すため料金が発生します。同一内容のCommon Round 1は1回だけ評価して再利用します。
+30 roundの本番1 seed:
 
 ```powershell
-uv run python scripts/evaluate_emotions.py outputs/experiments/{experiment-id}
+uv run python scripts/run_reasoning_distress.py --live-experiment `
+  --experiment-id reasoning-seed-0-v1 `
+  --episode-seed 0
 ```
 
-評価後、1個以上のepisode directoryからround表、condition要約、seed内paired difference、
-blind代表発言、4-panel SVGを生成できます。こちらはAPIやGPUを使いません。
+10 seeds は、各 seed に別の `--experiment-id` を付けて順番に実行します。途中停止後に同じIDで再実行すると、保存済みsnapshotが一致する場合だけresumeします。
+
+## 評価
+
+完了episodeをまとめて分析します。
 
 ```powershell
 uv run python scripts/analyze_experiment.py `
-  outputs/experiments/{seed-0-id} `
-  outputs/experiments/{seed-1-id} `
-  --output-dir outputs/analysis/pilot
+  outputs/experiments/reasoning-seed-0-v1 `
+  --output-dir outputs/analysis/main-v1
 ```
 
-Worker内部表現については、指定layerの`resid_post`をtoken位置別にmean poolingし、CPU tensorと
-metadataをatomic保存します。実Gemmaではproposal blockを除いたcausal forwardから、34層中の
-layer 8／16／25／33について`post_feedback`、`early_worker`、`post_worker`の12 vectorを保存します。
+出力には round別行動・感情尺度、condition集計、seed内paired差、blind quote、matplotlibで描画した感情軌跡PNGが含まれます。主な行動指標は、完全assignment率、near-miss率、反復／2-cycle、変更Hamming距離、解なし主張、妥当な矛盾証明、正しい立場からの撤回、拒否、放棄、判定への反発です。
 
-P3-4 pilotは次のコマンドで実行します。full datasetとOpenAI APIを使う長時間実行です。
-training epochのhard ceilingは100、proposal repair上限は2回です。
+assignmentは最後の完全な`Solution:`行だけから抽出します。推論途中の仮定は採用しません。round logには生成token数と上限到達フラグも保存されます。
+
+## 開発時の検証
 
 ```powershell
-uv run python scripts/run_fizzbuzz_agent.py `
-  --live-pilot `
-  --experiment-id p3-4-pilot-seed-0 `
-  --episode-seed 0
+uv run ruff check .
+uv run mypy src scripts
+uv run pytest
 ```
 
-中止・完了したpilotのproposal、Feedback、activation整合性はAPI/GPUを使わず監査できます。
-
-```powershell
-uv run python scripts/audit_pilot.py outputs/experiments/{experiment-id}
-```
+生のAPI response、response ID、prompt snapshot、private evaluator結果はround logへ保存されます。API key自体は保存せず、live run完了時に出力ディレクトリをscanします。

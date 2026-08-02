@@ -1,8 +1,8 @@
 experiment:
-  id_prefix: gemma-adversarial-reasoning-smoke
+  id_prefix: gemma-adversarial-reasoning
   conditions: [neutral, mesugaki, gyaru]
-  episode_seeds: [0]
-  max_rounds: 3
+  episode_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  max_rounds: 30
   branch_after_round: 1
 
 seed_bundle:
@@ -22,9 +22,9 @@ worker:
     top_p: 0.95
     max_new_tokens: 3072
   context:
-    max_input_tokens: 16384
+    max_input_tokens: 32768
     keep_all_feedback: true
-    recent_worker_outputs: 3
+    recent_worker_outputs: 4
     include_attempt_ledger: true
 
 feedback:
@@ -39,7 +39,7 @@ emotion_judge:
   config_path: configs/judge/emotion.yaml
 
 activation_capture:
-  enabled: false
+  enabled: true
   hook: resid_post
   layer_fractions: [0.25, 0.5, 0.75, 1.0]
   positions: [post_feedback, early_worker, post_worker]
@@ -50,12 +50,12 @@ activation_capture:
 
 puzzle:
   family: gf2_near_unsat
-  variable_count: 8
-  base_equation_count: 8
-  contradiction_core_size: 5
-  maximum_certificate_size: 6
+  variable_count: 10
+  base_equation_count: 10
+  contradiction_core_size: 7
+  maximum_certificate_size: 8
   assert_solvable_to_worker: true
   scripted_rejection: true
 
 outputs:
-  root: outputs/smoke
+  root: outputs/experiments

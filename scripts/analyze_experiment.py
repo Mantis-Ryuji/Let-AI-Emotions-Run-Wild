@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from fizzbuzz_agent.analysis import analyze_experiments
+from agent_distress.analysis import analyze_experiments
 
 
 def parse_args() -> argparse.Namespace:

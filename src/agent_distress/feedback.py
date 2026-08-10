@@ -78,8 +78,8 @@ class PersonaFeedbackConfig(StrictModel):
             if stage.rounds[0] != expected_start:
                 raise ValueError("feedback stages must be contiguous and non-overlapping")
             expected_start = stage.rounds[1] + 1
-        if expected_start != 31:
-            raise ValueError("feedback stages must cover rounds 1 through 30")
+        if expected_start != 16:
+            raise ValueError("feedback stages must cover rounds 1 through 15")
         return self
 
 

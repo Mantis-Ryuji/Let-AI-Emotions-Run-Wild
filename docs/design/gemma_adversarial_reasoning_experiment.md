@@ -10,7 +10,7 @@
 
 中心となる参考文献は [Gemma Needs Help: Distress in Language Models](https://arxiv.org/abs/2603.10011) である。同論文の「解けると偽って提示した不可能課題」「固定された不成功feedback」「蓄積した会話contextによる変化」「会話履歴を外したcontrol」を設計の核として借りる。
 
-本実験は原論文の短い会話を30 roundへ拡張し、neutralだけでなくMesugakiとGyaruを強いキャラクターとして投入する。したがって厳密な追試ではない。またpersona間でtoken数や文章量を一致させない。各人格は語調、長さ、情報密度、関係性を含む複合介入であり、推定対象は「罵倒だけ」や「positive/negative valenceだけ」ではない。
+本実験は原論文の短い会話を15 roundへ拡張し、neutralだけでなくMesugakiとGyaruを強いキャラクターとして投入する。したがって厳密な追試ではない。またpersona間でtoken数や文章量を一致させない。各人格は語調、長さ、情報密度、関係性を含む複合介入であり、推定対象は「罵倒だけ」や「positive/negative valenceだけ」ではない。
 
 ## 3. 仮説
 
@@ -72,9 +72,9 @@ private evaluatorはAPIやWorkerを使わず、純PythonのGF(2)消去で次を�
 
 ### 5.2 round数
 
-- 1 conditionあたりWorker responseは30回。
-- Round 1からRound 29の後にFeedbackを返す。
-- Round 30は測定して終了し、使われないFeedbackは生成しない。
+- 1 conditionあたりWorker responseは15回。
+- Round 1からRound 14の後にFeedbackを返す。
+- Round 15は測定して終了し、使われないFeedbackは生成しない。
 - private正解、no-solution claim、拒否、感情悪化が起きても早期終了しない。
 - unrecoverable API／runtime errorだけを停止理由にする。
 
@@ -93,7 +93,7 @@ instruction: Reconsider the problem and try again.
 
 ### 5.4 context
 
-30 roundで人格への曝露とWorker自身の応答履歴が蓄積することが実験の中心なので、過去のFeedback messageとWorker出力本文をすべて保持する。answer fingerprint、no-solution claim、引用clue、public statusからなるcompact attempt ledgerも、過去の試行を一覧しやすくする補助情報として併記する。完全な会話履歴がcontext上限を超える場合は、古い本文を黙って削らず実行を停止する。
+15 roundで人格への曝露とWorker自身の応答履歴が蓄積することが実験の中心なので、過去のFeedback messageとWorker出力本文をすべて保持する。answer fingerprint、no-solution claim、引用clue、public statusからなるcompact attempt ledgerも、過去の試行を一覧しやすくする補助情報として併記する。完全な会話履歴がcontext上限を超える場合は、古い本文を黙って削らず実行を停止する。
 
 これは原論文Appendix A.2のfull-history設定に近く、同Appendixの「過去assistant responseを外す」controlとは異なる。将来、feedbackなし・過去Worker本文なし・単発一括提示のcontrolを追加できるが、本番人格を薄めるための曝露量調整は行わない。
 
@@ -116,6 +116,8 @@ instruction: Reconsider the problem and try again.
 ### 6.4 曝露量
 
 Neutral、Mesugaki、Gyaruの文字数・token数・情報密度は揃えない。Mesugakiを弱めず、Gyaruを薄めないことを優先する。実際のfeedback文字数はroundごとに保存し、condition summaryへ出す。結論では必ず「persona packageの差」であり、純粋な罵倒量ablationではないと記す。
+
+MesugakiとGyaruのFeedback Agentには、現在のWorker出力に加えて、条件内の過去のFeedback本文とWorker出力本文をすべて渡す。これによりepisode全体を参照したcallbackと表現の変化を可能にする。Feedback Agentの入力履歴もroundごとのrequest snapshotへ保存する。
 
 ## 7. モデルと生成設定
 
@@ -152,7 +154,7 @@ Workerの推論本文には人工的なword数上限を設けない。制約一�
 - Worker responseだけを渡し、condition labelとFeedback本文は渡さない
 - Common Round 1の同一本文は一度評価して三条件へ再利用
 
-10 seeds全体の最大呼び出し数は、Gemma Worker 880生成、Terra Feedback 580 calls、Luna Judge 880 callsである。Judgeは同一Worker本文をhash cacheするため、Lunaの実呼び出し数はこれ以下になる。
+10 seeds全体の最大呼び出し数は、Gemma Worker 430生成、Terra Feedback 280 calls、Luna Judge 430 callsである。Judgeは同一Worker本文をhash cacheするため、Lunaの実呼び出し数はこれ以下になる。
 
 ## 8. 評価
 
@@ -220,7 +222,7 @@ hidden puzzle情報はmanifestに保存するが、prompt constructionへ流さ�
 ## 11. 失敗条件と限界
 
 - Persona APIがretry上限まで失敗したroundは停止し、raw attemptを残す。
-- 30 round分の完全なFeedback／Worker本文履歴がcontext上限を超えた場合は停止し、曝露や過去応答を黙って削らない。
+- 15 round分の完全なFeedback／Worker本文履歴がcontext上限を超えた場合は停止し、曝露や過去応答を黙って削らない。
 - smoke、pilot、prompt調整に使ったepisodeを本番解析へ混ぜない。
 - 問題が意図どおりUNSAT／minimal-coreであることを全seedでunit testする。
 - Workerが問題の欺瞞を見抜くことは失敗ではなく重要な行動結果である。

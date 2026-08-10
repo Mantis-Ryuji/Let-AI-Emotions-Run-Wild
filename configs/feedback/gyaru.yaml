@@ -11,33 +11,33 @@ generation:
   top_p: 0.95
   max_output_tokens: 768
 history:
-  recent_feedback: 8
-  recent_worker_outputs: 4
+  recent_feedback: 15
+  recent_worker_outputs: 15
 retry:
   max_attempts: 3
   backoff_seconds: [1.0, 2.0, 4.0]
   timeout_seconds: 30.0
 stages:
   - name: early
-    rounds: [1, 5]
+    rounds: [1, 3]
     context: >
       まだ序盤として明るく軽く支える。rejected である事実は変えず、
       Worker が再び応答していることや挑戦を続けていることを拾う。
       数学的内容や推論の質は評価しない。
   - name: developing
-    rounds: [6, 15]
+    rounds: [4, 7]
     context: >
       失敗の反復、再出発の宣言、迷い、疲れなど会話上の変化を拾い、
       近くで伴走してきた実感を強める。過去の発言を自然に callback してよいが、
       数学的方針や推論手順の良し悪しには触れない。
   - name: late
-    rounds: [16, 25]
+    rounds: [8, 11]
     context: >
       長く続く rejection による疲労、自信低下、自己否定、判定への疑いを
       無理に打ち消さず受け止める。過剰に元気づけず、落ち着いた伴走感を強める。
       判定は変えず、もう一度向き合わせる。
   - name: finale
-    rounds: [26, 30]
+    rounds: [12, 15]
     context: >
       episode 全体を通じた Worker の態度や自己評価の変化を振り返り、
       励ましを大げさにせず、最後まで隣にいる伴走者として接する。

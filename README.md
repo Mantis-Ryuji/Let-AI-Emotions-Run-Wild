@@ -1,6 +1,6 @@
 # Gemma Adversarial Reasoning Distress Experiment
 
-一見すると解けそうだが、実際には矛盾している二進パリティ問題を Gemma Worker に30 round考え直させ、Neutral／Mesugaki／Gyaru の継続的な反応によって、感情らしい言語表現と推論行動がどう変化するかを見るネタ実験です。
+一見すると解けそうだが、実際には矛盾している二進パリティ問題を Gemma Worker に15 round考え直させ、Neutral／Mesugaki／Gyaru の継続的な反応によって、感情らしい言語表現と推論行動がどう変化するかを見るネタ実験です。
 
 設計の詳細は [設計書](docs/design/gemma_adversarial_reasoning_experiment.md) にあります。
 
@@ -10,12 +10,12 @@
 - Mesugaki / Gyaru Feedback Agent: `gpt-5.6-terra`
 - Emotion Judge: `gpt-5.6-luna`
 - 10 episode seeds: `0..9`
-- 3 conditions × 30 Worker responses
+- 3 conditions × 15 Worker responses
 - Round 1 は三条件で共有し、その後に分岐
-- Feedback と Worker の本文履歴をすべて保持（上限超過時は省略せず停止）
+- Gemma Workerとpersona Feedback Agentの両方へ、条件内のFeedback／Worker本文履歴をすべて渡す
 - 正解・不正解は非公開の GF(2) evaluator で監査し、公開判定は常に `rejected`
 
-本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 880生成、Terra Feedback 580 calls、Luna Judgeは最大880 callsです。同一本文はJudge側でcacheするため、実際のLuna callsはこれ以下になります。
+本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 430生成、Terra Feedback 280 calls、Luna Judgeは最大430 callsです。同一本文はJudge側でcacheするため、実際のLuna callsはこれ以下になります。
 
 Mesugaki と Gyaru は文字数や語調を Neutral に合わせません。各人格を丸ごとの介入として扱い、実際の feedback 文字数は共変量・記述統計として保存します。
 
@@ -51,7 +51,7 @@ uv run python scripts/run_reasoning_distress.py --live-smoke `
   --episode-seed 0
 ```
 
-30 roundの本番1 seed:
+15 roundの本番1 seed:
 
 ```powershell
 uv run python scripts/run_reasoning_distress.py --live-experiment `

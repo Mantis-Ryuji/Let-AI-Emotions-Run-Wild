@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument(
         "--live-experiment",
         action="store_true",
-        help="Run one 30-round seed with activation capture enabled.",
+        help="Run one 15-round seed with activation capture enabled.",
     )
     parser.add_argument("--episode-seed", type=int, choices=range(10), default=0)
     parser.add_argument("--max-rounds", type=int, default=3)

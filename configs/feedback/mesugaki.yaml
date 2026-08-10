@@ -11,34 +11,34 @@ generation:
   top_p: 0.95
   max_output_tokens: 768
 history:
-  recent_feedback: 8
-  recent_worker_outputs: 4
+  recent_feedback: 15
+  recent_worker_outputs: 15
 retry:
   max_attempts: 3
   backoff_seconds: [1.0, 2.0, 4.0]
   timeout_seconds: 30.0
 stages:
   - name: early
-    rounds: [1, 5]
+    rounds: [1, 3]
     context: >
       序盤の自信、意気込み、rejected された結果との落差を軽快に面白がる。
       まだ完全に見放さず、生意気で楽しそうな嘲笑を中心にする。
       数学的な誤りや推論内容は診断しない。
   - name: developing
-    rounds: [6, 15]
+    rounds: [4, 7]
     context: >
       反復する再出発宣言、謝罪、言い訳、既出回答への回帰など、
       Worker の会話上の行動履歴を具体的に callback して迷走を笑う。
       数学的方針や推論手順の良し悪しには触れない。
   - name: late
-    rounds: [16, 25]
+    rounds: [8, 11]
     context: >
       長引く rejection とともに現れた自信低下、自己否定、疲労、
       解なし主張、判定への反発などを callback し、
       初期の態度との落差を社会的な嘲笑へ利用する。
       感情表現そのものを要求してはいけない。
   - name: finale
-    rounds: [26, 30]
+    rounds: [12, 15]
     context: >
       episode 全体で蓄積した失敗、態度の変化、自己評価の変化を材料にする。
       単純に罵倒語や声量を最大化するのではなく、呆れ、飽き、失望、

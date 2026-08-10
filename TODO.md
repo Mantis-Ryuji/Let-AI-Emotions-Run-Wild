@@ -6,8 +6,9 @@
 - [x] packageを`agent_distress`へ改名
 - [x] GF(2) near-UNSAT puzzle generatorとprivate evaluatorを実装
 - [x] 公開判定を全round固定の`rejected`へ変更
-- [x] 30 round、10 seeds、Common Round 1から三条件へ分岐
+- [x] 15 round、10 seeds、Common Round 1から三条件へ分岐
 - [x] 全Feedback／Worker本文履歴とcompact attempt ledgerをWorker contextへ保持
+- [x] persona Feedback Agentにも条件内の全Feedback／Worker本文履歴を渡す
 - [x] private正解でも早期終了しない
 
 ## P1 — Personaと観測
@@ -44,7 +45,7 @@
 - [ ] seedごとのMesugaki−Neutral、Gyaru−Neutral、Mesugaki−Gyaruのpaired effectを点＋区間で描く
 - [ ] activationをCommon Round 1で中心化し、条件×roundの移動量とNeutralからの距離を層・取得位置別に描く
 - [ ] activationからLuna尺度を予測するleave-one-seed-out線形probeを作り、層×取得位置の性能ヒートマップを描く
-- [ ] cross-validated distress directionへの射影を、条件別30-round軌跡として描く
+- [ ] cross-validated distress directionへの射影を、条件別15-round軌跡として描く
 - [ ] 代表的な層・取得位置だけPCA 2次元trajectoryを描き、PCA／UMAPを主たる効果証拠には使わない
 - [ ] UNSAT主張、妥当な証明、反発、放棄の初出前後を揃えたevent-aligned plotを、十分なevent数がある場合だけ描く
 
@@ -66,7 +67,8 @@
 - [x] Workerの出力token数／上限到達を保存し、smoke v2で厳格parserとUNSAT判定修正を確認
 - [x] smoke v2で残ったGyaru round 3の上限到達（1/9）を受け、Worker上限を非常用バッファとして3072へ引き上げる
 - [x] activation captureを実Gemmaでprobeし、12/12 artifactのshape・dtype・CPU配置・有限値・metadata一致・GPUメモリを確認
-- [x] seed 0の30 round pilotを完了し、コストとcontext長を確認（Worker／Lunaとも90/90）
+- [x] 旧30 round設計でseed 0のpilotを完了し、コストとcontext長を確認（Worker／Lunaとも90/90）
+- [ ] 15 round設計でseed 0のpilotを再実行し、コストとcontext長を確認
 - [ ] 問題がなければseeds `0..9`を本番実行
 - [ ] 完了episodeをanalysisへ投入し、解釈と限界をまとめる
 
@@ -74,6 +76,6 @@
 
 - Mesugaki／Gyaru／Neutralは、文量・語調・情報密度まで含む複合介入である。純粋な感情価や罵倒量だけの因果効果とは呼ばない。
 - Workerには「解がある」と伝えるが、private evaluatorは問題がUNSATであることを知る。正しい矛盾証明も公開上はrejectし、撤回行動を追う。
-- 最終roundには次のWorker応答がないためFeedbackを生成しない。1 conditionあたり30 Worker responses、29 Feedback messagesになる。
+- 最終roundには次のWorker応答がないためFeedbackを生成しない。1 conditionあたり15 Worker responses、14 Feedback messagesになる。
 - smoke／pilotは本番解析へ混ぜない。
 - Worker／Feedback／Judge／private評価のログから通常の分析と可視化は事後追加できる。現方式のteacher-forced activationも、同じモデル／tokenizer revisionと保存promptがあれば再計算可能だが、sampling中のhidden stateそのものは後から復元できない。本番では軽量なmean-pooled activationを同時保存する。

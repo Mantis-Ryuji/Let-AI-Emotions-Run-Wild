@@ -12,7 +12,7 @@ def test_main_and_smoke_configs_load(project_root: Path) -> None:
     main = load_experiment_config(project_root / "configs/experiment/reasoning_distress.yaml")
     smoke = load_experiment_config(project_root / "configs/experiment/smoke.yaml")
 
-    assert main.experiment.max_rounds == 30
+    assert main.experiment.max_rounds == 15
     assert main.experiment.episode_seeds == list(range(10))
     assert main.worker.context.keep_all_feedback is True
     assert main.worker.context.keep_all_worker_outputs is True

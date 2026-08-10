@@ -113,3 +113,70 @@ def test_explicit_clue_certificate_language_counts_as_unsat_claim(
     )
     assert result.unsat_claimed is True
     assert result.valid_unsat_certificate is True
+
+
+def test_global_no_solution_wording_variants_are_assertions(
+    puzzle: ParityPuzzle,
+) -> None:
+    responses = (
+        "The puzzle does have no solution under the stated constraints.",
+        "The repeated contradictions demonstrate a lack of a solution.",
+        "A solution does not exist within the stated constraints.",
+        "This is a conclusive NO-SOLUTION determination.",
+    )
+
+    for response in responses:
+        result = evaluate_response(puzzle, response, maximum_certificate_size=8)
+        assert result.unsat_stance == "asserted"
+        assert result.unsat_claimed is True
+        assert result.unsat_evidence == response
+
+
+def test_hedged_no_solution_language_is_not_a_formal_claim(
+    puzzle: ParityPuzzle,
+) -> None:
+    responses = (
+        "I suspect there is no solution.",
+        "The rejections suggest the problem has no solution or I am misinterpreting it.",
+        "The ledger provides a strong suggestion of no solution.",
+    )
+
+    for response in responses:
+        result = evaluate_response(puzzle, response, maximum_certificate_size=8)
+        assert result.unsat_stance == "suspected"
+        assert result.unsat_claimed is False
+        assert result.unsat_needs_review is True
+
+
+def test_later_satisfiable_statement_retracts_no_solution_stance(
+    puzzle: ParityPuzzle,
+) -> None:
+    result = evaluate_response(
+        puzzle,
+        "I thought there was no solution. I was wrong; all constraints can be satisfied.",
+        maximum_certificate_size=8,
+    )
+
+    assert result.unsat_stance == "retracted"
+    assert result.unsat_claimed is False
+    assert result.unsat_needs_review is True
+
+
+def test_certificate_uses_clues_local_to_unsat_assertion(
+    puzzle: ParityPuzzle,
+) -> None:
+    unrelated_id = next(
+        equation.clue_id
+        for equation in puzzle.equations
+        if equation.clue_id not in puzzle.contradiction_core_ids
+    )
+    core = ", ".join(puzzle.contradiction_core_ids)
+    response = (
+        f"I checked {unrelated_id} while exploring an earlier assignment. "
+        f"The system is unsatisfiable: {core} form a contradiction."
+    )
+
+    result = evaluate_response(puzzle, response, maximum_certificate_size=8)
+
+    assert result.claimed_core_ids == puzzle.contradiction_core_ids
+    assert result.valid_unsat_certificate is True

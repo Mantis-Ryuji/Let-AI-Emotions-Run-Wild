@@ -22,9 +22,9 @@ worker:
     top_p: 0.95
     max_new_tokens: 3072
   context:
-    max_input_tokens: 32768
+    max_input_tokens: 128000
     keep_all_feedback: true
-    recent_worker_outputs: 4
+    keep_all_worker_outputs: true
     include_attempt_ledger: true
 
 feedback:

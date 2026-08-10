@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +26,33 @@ class RuntimeGeneration:
 
 
 WorkerGenerationMode = Literal["worker"]
+CHUNKED_PREFILL_INPUT_THRESHOLD = 8192
+PREFILL_CHUNK_SIZE = 512
+
+
+def _validate_input_token_count(input_token_count: int, max_input_tokens: int) -> None:
+    if input_token_count > max_input_tokens:
+        raise ValueError(
+            "Complete conversation history exceeds max_input_tokens after Gemma tokenization; "
+            "shorten the episode or revise the configured context instead of truncating history."
+        )
+
+
+def _run_with_offloaded_cache_fallback[T](
+    generate: Callable[[], T],
+    generation_parameters: dict[str, object],
+) -> tuple[T, bool]:
+    try:
+        return generate(), False
+    except torch.OutOfMemoryError:
+        if generation_parameters.get("cache_implementation") == "offloaded":
+            raise
+    # Retry outside the except block so the failed forward's traceback can release its tensors.
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    generation_parameters["cache_implementation"] = "offloaded"
+    generation_parameters["prefill_chunk_size"] = PREFILL_CHUNK_SIZE
+    return generate(), True
 
 
 class WorkerRuntime(Protocol):
@@ -98,6 +126,7 @@ class TransformersGemmaRuntime:
             raise ValueError("enabled activation capture requires activation_root")
         self._tokenizer: Any | None = None
         self._model: Any | None = None
+        self._offloaded_cache_required = False
 
     @property
     def loaded(self) -> bool:
@@ -145,25 +174,46 @@ class TransformersGemmaRuntime:
             return_tensors="pt",
             return_dict=True,
         )
-        input_ids = cast(Tensor, encoded["input_ids"]).to(self.config.device)
+        encoded_input_ids = cast(Tensor, encoded["input_ids"])
+        input_token_count = int(encoded_input_ids.shape[1])
+        _validate_input_token_count(
+            input_token_count,
+            self.config.context.max_input_tokens,
+        )
+        input_ids = encoded_input_ids.to(self.config.device)
         attention_mask = cast(Tensor, encoded["attention_mask"]).to(self.config.device)
         devices = (
             [input_ids.device.index]
             if input_ids.is_cuda and input_ids.device.index is not None
             else []
         )
-        with torch.random.fork_rng(devices=devices):
-            torch.manual_seed(seed)
-            if input_ids.is_cuda:
-                torch.cuda.manual_seed_all(seed)
-            output_ids = cast(
-                Tensor,
-                model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    **generation_parameters,
-                ),
-            )
+        if self._offloaded_cache_required:
+            generation_parameters["cache_implementation"] = "offloaded"
+            generation_parameters["prefill_chunk_size"] = PREFILL_CHUNK_SIZE
+        elif input_token_count >= CHUNKED_PREFILL_INPUT_THRESHOLD:
+            generation_parameters["cache_implementation"] = "dynamic"
+            generation_parameters["prefill_chunk_size"] = PREFILL_CHUNK_SIZE
+
+        def generate_once() -> Tensor:
+            with torch.random.fork_rng(devices=devices):
+                torch.manual_seed(seed)
+                if input_ids.is_cuda:
+                    torch.cuda.manual_seed_all(seed)
+                return cast(
+                    Tensor,
+                    model.generate(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        **generation_parameters,
+                    ),
+                )
+
+        output_ids, fell_back = _run_with_offloaded_cache_fallback(
+            generate_once,
+            generation_parameters,
+        )
+        if fell_back:
+            self._offloaded_cache_required = True
         generated_ids = output_ids[0, input_ids.shape[1] :]
         generated_token_count = int(generated_ids.numel())
         configured_limit = generation_parameters.get("max_new_tokens")
@@ -246,16 +296,50 @@ class TransformersGemmaRuntime:
             )
 
         with torch.inference_mode():
-            _, files = capture.capture_many(
-                lambda: text_model(
-                    input_ids=capture_ids,
-                    attention_mask=capture_mask,
-                    use_cache=False,
-                ),
-                token_slices=token_slices,
-                round_index=round_index,
-                condition=condition,
-            )
+            if capture_ids.shape[1] < CHUNKED_PREFILL_INPUT_THRESHOLD:
+                _, files = capture.capture_many(
+                    lambda: text_model(
+                        input_ids=capture_ids,
+                        attention_mask=capture_mask,
+                        use_cache=False,
+                    ),
+                    token_slices=token_slices,
+                    round_index=round_index,
+                    condition=condition,
+                )
+            else:
+                from transformers import DynamicCache
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                cache = DynamicCache(
+                    config=model.config.get_text_config(decoder=True),
+                    offloading=False,
+                )
+                chunks: list[tuple[int, int, Callable[[], object]]] = []
+                for start in range(0, capture_ids.shape[1], PREFILL_CHUNK_SIZE):
+                    end = min(start + PREFILL_CHUNK_SIZE, capture_ids.shape[1])
+
+                    def forward_chunk(start: int = start, end: int = end) -> object:
+                        return text_model(
+                            input_ids=capture_ids[:, start:end],
+                            attention_mask=capture_mask[:, :end],
+                            past_key_values=cache,
+                            use_cache=True,
+                        )
+
+                    chunks.append((start, end, forward_chunk))
+                explicit_slices = {
+                    position: token_slice
+                    for position, token_slice in token_slices.items()
+                    if token_slice is not None
+                }
+                files = capture.capture_many_chunked(
+                    chunks,
+                    token_slices=explicit_slices,
+                    round_index=round_index,
+                    condition=condition,
+                )
         return files
 
     @staticmethod

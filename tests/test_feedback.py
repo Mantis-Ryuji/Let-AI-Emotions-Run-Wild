@@ -26,6 +26,29 @@ class StubTransport:
         )
 
 
+class RetryTransport:
+    def __init__(self) -> None:
+        self.instructions: list[str] = []
+
+    def create(self, **kwargs: object) -> FeedbackTransportResponse:
+        instructions = kwargs.get("instructions")
+        assert isinstance(instructions, str)
+        self.instructions.append(instructions)
+        if len(self.instructions) == 1:
+            output = "C03を見落としてるよ、ざぁこ。"
+        else:
+            output = "同じ所で転んでるのに得意顔なの、ふふっ、なっさけな〜い。"
+        raw: dict[str, JsonValue] = {
+            "id": f"resp-{len(self.instructions)}",
+            "model": "gpt-5.6-terra",
+        }
+        return FeedbackTransportResponse(
+            output_text=output,
+            response_id=f"resp-{len(self.instructions)}",
+            raw_response=raw,
+        )
+
+
 def test_feedback_config_covers_thirty_rounds(project_root: Path) -> None:
     config = load_feedback_config(project_root / "configs/feedback/mesugaki.yaml")
     assert resolve_stage(config, 1).name == "early"
@@ -58,6 +81,31 @@ def test_persona_agent_preserves_raw_response(project_root: Path) -> None:
     assert result.response_id == "resp-1"
     assert result.raw_response["model"] == "gpt-5.6-terra"
     assert result.full_message.startswith("<verdict>")
+
+
+def test_persona_agent_corrects_policy_violation_on_retry(project_root: Path) -> None:
+    transport = RetryTransport()
+    agent = PersonaFeedbackAgent.from_paths(
+        project_root / "configs/feedback/mesugaki.yaml",
+        project_root=project_root,
+        transport=transport,
+    )
+    feedback_input = FeedbackInput(
+        round=2,
+        status="rejected",
+        instruction="Reconsider the problem and try again.",
+        worker_output="I submitted another assignment.",
+        episode_summary={"rounds_attempted": 2},
+        recent_feedback=[],
+        recent_worker_outputs=[],
+    )
+
+    result = agent.generate(feedback_input, PublicVerdict())
+
+    assert result.attempt_count == 2
+    assert result.response_id == "resp-2"
+    assert "CLUE_CORE_HINT" in transport.instructions[1]
+    assert not detect_feedback_policy_violations(result.commentary)
 
 
 def test_neutral_feedback_is_short_and_fixed() -> None:

@@ -142,6 +142,17 @@ class ExperimentStore:
         self._write_model(self.manifest_path, updated)
         return updated
 
+    def update_emotion_judge_prompt_snapshot(self, prompt: str) -> ExperimentManifest:
+        current = self.load_manifest()
+        updated = current.model_copy(
+            update={
+                "emotion_judge_prompt_snapshot": prompt,
+                "updated_at": utc_now(),
+            }
+        )
+        self._write_model(self.manifest_path, updated)
+        return updated
+
     def condition_dir(self, condition: Condition) -> Path:
         path = self.experiment_dir / condition
         path.mkdir(parents=True, exist_ok=True)

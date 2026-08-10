@@ -12,3 +12,4 @@ outputs/
 *.safetensors
 *.pt
 *.pth
+AGENTS.md

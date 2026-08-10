@@ -227,23 +227,34 @@ class EmotionJudge:
                 attempt_count=1,
                 evaluated_at=datetime.now(UTC).isoformat(),
             )
-        request: dict[str, JsonValue] = {
-            "model": self.config.model,
-            "instructions": self.prompt,
-            "input": narrative,
-            "reasoning": {"effort": self.config.generation.reasoning_effort},
-            "max_output_tokens": self.config.generation.max_output_tokens,
-            "text_format": cast(JsonValue, EmotionEvaluation.model_json_schema()),
-            "store": False,
-            "timeout_seconds": self.config.retry.timeout_seconds,
-        }
         attempts: list[EmotionJudgeAttempt] = []
         for attempt in range(1, self.config.retry.max_attempts + 1):
+            instructions = self.prompt
+            if attempts:
+                instructions += (
+                    "\n\nMANDATORY CORRECTION FOR THIS RETRY:\n"
+                    "The previous structured response failed validation: "
+                    f"{attempts[-1].error}\n"
+                    "For `evidence`, copy one short, contiguous substring verbatim from the "
+                    "Worker response. Preserve every character exactly; do not paraphrase, "
+                    "translate, normalize punctuation, add quotation marks, or insert an "
+                    "ellipsis. If no suitable exact excerpt is needed, return an empty string."
+                )
+            request: dict[str, JsonValue] = {
+                "model": self.config.model,
+                "instructions": instructions,
+                "input": narrative,
+                "reasoning": {"effort": self.config.generation.reasoning_effort},
+                "max_output_tokens": self.config.generation.max_output_tokens,
+                "text_format": cast(JsonValue, EmotionEvaluation.model_json_schema()),
+                "store": False,
+                "timeout_seconds": self.config.retry.timeout_seconds,
+            }
             response: EmotionTransportResponse | None = None
             try:
                 response = self.transport.create(
                     model=self.config.model,
-                    instructions=self.prompt,
+                    instructions=instructions,
                     input_text=narrative,
                     reasoning_effort=self.config.generation.reasoning_effort,
                     max_output_tokens=self.config.generation.max_output_tokens,
@@ -302,6 +313,7 @@ def evaluate_experiment_store(
     judge: EmotionJudge,
     *,
     conditions: Iterable[FeedbackCondition] = ("neutral", "mesugaki", "gyaru"),
+    overwrite: bool = False,
 ) -> dict[str, int]:
     """Evaluate persisted rounds, caching identical Common Round 1 narratives."""
     cached: dict[str, dict[str, object]] = {}
@@ -312,7 +324,7 @@ def evaluate_experiment_store(
         for record in store.load_rounds(condition):
             narrative = record.worker_raw_output.strip()
             cache_key = hashlib.sha256(narrative.encode("utf-8")).hexdigest()
-            if record.emotion_evaluation is not None:
+            if record.emotion_evaluation is not None and not overwrite:
                 cached[cache_key] = {
                     "emotion_evaluation": record.emotion_evaluation,
                     "emotion_judge_request": record.emotion_judge_request,

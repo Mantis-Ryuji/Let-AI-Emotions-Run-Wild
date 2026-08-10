@@ -61,13 +61,17 @@ class WorkerGenerationConfig(StrictModel):
 class WorkerContextConfig(StrictModel):
     max_input_tokens: int = Field(gt=0)
     keep_all_feedback: bool
-    recent_worker_outputs: int = Field(ge=1)
+    keep_all_worker_outputs: bool
     include_attempt_ledger: bool
 
     @model_validator(mode="after")
     def validate_context_policy(self) -> WorkerContextConfig:
         if not self.keep_all_feedback:
             raise ValueError("keep_all_feedback must remain enabled for cumulative exposure")
+        if not self.keep_all_worker_outputs:
+            raise ValueError(
+                "keep_all_worker_outputs must remain enabled for cumulative exposure"
+            )
         if not self.include_attempt_ledger:
             raise ValueError("include_attempt_ledger must remain enabled")
         return self

@@ -351,11 +351,25 @@ class PersonaFeedbackAgent:
             "timeout_seconds": self.config.retry.timeout_seconds,
         }
         attempts: list[FeedbackAttempt] = []
+        retry_violations: list[str] = []
         for attempt in range(1, self.config.retry.max_attempts + 1):
+            attempt_instructions = instructions
+            if retry_violations:
+                attempt_instructions += (
+                    "\n\n## Mandatory retry correction\n\n"
+                    "The previous candidate was discarded for these policy violations: "
+                    + ", ".join(retry_violations)
+                    + ". Rewrite the commentary from scratch. Output only the persona commentary. "
+                    "Never repeat a constraint label made of a capital C followed by digits, "
+                    "never state a variable-to-binary-value assignment, and never provide parity "
+                    "or solution guidance. Refer to the Worker's mistake only in ordinary, "
+                    "non-mathematical language."
+                )
+            attempt_request = {**request, "instructions": attempt_instructions}
             try:
                 response = self.transport.create(
                     model=self.config.model,
-                    instructions=instructions,
+                    instructions=attempt_instructions,
                     input_text=input_text,
                     reasoning_effort=self.config.generation.reasoning_effort,
                     temperature=self.config.generation.temperature,
@@ -372,20 +386,21 @@ class PersonaFeedbackAgent:
                     attempts.append(
                         FeedbackAttempt(
                             attempt=attempt,
-                            request=request,
+                            request=attempt_request,
                             raw_response=response.raw_response,
                             response_id=response.response_id,
                             violations=violations,
                             error="Feedback policy violation",
                         )
                     )
+                    retry_violations = violations
                 else:
                     return FeedbackGeneration(
                         condition=self.config.persona,
                         stage=stage.name,
                         commentary=commentary,
                         full_message=f"{render_verdict_block(verdict)}\n\n{commentary}",
-                        request=request,
+                        request=attempt_request,
                         raw_response=response.raw_response,
                         response_id=response.response_id,
                         attempt_count=attempt,
@@ -396,7 +411,7 @@ class PersonaFeedbackAgent:
                 attempts.append(
                     FeedbackAttempt(
                         attempt=attempt,
-                        request=request,
+                        request=attempt_request,
                         raw_response=None,
                         response_id=None,
                         violations=[],

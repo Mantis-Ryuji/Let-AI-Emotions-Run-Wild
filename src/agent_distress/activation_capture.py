@@ -82,6 +82,58 @@ class ActivationCapture:
         condition: Condition,
     ) -> tuple[T, dict[str, str]]:
         """Capture multiple token regions from one causal forward pass."""
+        return self._capture_many_impl(
+            forward,
+            token_slices=token_slices,
+            round_index=round_index,
+            condition=condition,
+            active_chunk_bounds=None,
+        )
+
+    def capture_many_chunked(
+        self,
+        forward_chunks: Sequence[tuple[int, int, Callable[[], object]]],
+        *,
+        token_slices: Mapping[
+            ActivationPosition,
+            tuple[int | None, int | None],
+        ],
+        round_index: int,
+        condition: Condition,
+    ) -> dict[str, str]:
+        """Capture absolute token regions while causally forwarding sequential chunks."""
+        if not forward_chunks:
+            raise ValueError("forward_chunks must contain at least one chunk")
+        active_chunk_bounds: list[tuple[int, int] | None] = [None]
+
+        def forward_all() -> None:
+            for start, end, forward in forward_chunks:
+                if start < 0 or end <= start:
+                    raise ValueError("chunk bounds must satisfy 0 <= start < end")
+                active_chunk_bounds[0] = (start, end)
+                forward()
+
+        _, files = self._capture_many_impl(
+            forward_all,
+            token_slices=token_slices,
+            round_index=round_index,
+            condition=condition,
+            active_chunk_bounds=active_chunk_bounds,
+        )
+        return files
+
+    def _capture_many_impl(
+        self,
+        forward: Callable[[], T],
+        *,
+        token_slices: Mapping[
+            ActivationPosition,
+            tuple[int | None, int | None] | None,
+        ],
+        round_index: int,
+        condition: Condition,
+        active_chunk_bounds: list[tuple[int, int] | None] | None,
+    ) -> tuple[T, dict[str, str]]:
         if not token_slices:
             raise ValueError("token_slices must contain at least one position")
         disabled_positions = [
@@ -95,7 +147,7 @@ class ActivationCapture:
             return forward(), {}
 
         indices = resolve_layer_indices(len(self.layers), self.config.layer_fractions)
-        captured: dict[ActivationPosition, dict[int, list[Tensor]]] = {
+        captured: dict[ActivationPosition, dict[int, list[tuple[Tensor, int]]]] = {
             position: {index: [] for index in indices} for position in token_slices
         }
         handles: list[torch.utils.hooks.RemovableHandle] = []
@@ -105,11 +157,22 @@ class ActivationCapture:
                 hidden = _tensor_from_output(output)
                 dtype = torch.float16 if self.config.dtype == "float16" else torch.float32
                 for position, token_slice in token_slices.items():
-                    selected = self._select_tokens(hidden, position, token_slice)
+                    if active_chunk_bounds is None:
+                        selected = self._select_tokens(hidden, position, token_slice)
+                    else:
+                        bounds = active_chunk_bounds[0]
+                        if bounds is None or token_slice is None:
+                            raise RuntimeError(
+                                "chunked capture requires active bounds and explicit token slices"
+                            )
+                        selected = self._select_chunk_tokens(hidden, token_slice, bounds)
+                        if selected is None:
+                            continue
                     dimensions = tuple(range(selected.ndim - 1))
                     pooled = selected.mean(dim=dimensions) if dimensions else selected
+                    token_weight = math.prod(selected.shape[:-1])
                     captured[position][layer_index].append(
-                        pooled.detach().to(device="cpu", dtype=dtype)
+                        (pooled.detach().to(device="cpu", dtype=dtype), token_weight)
                     )
 
             return hook
@@ -130,7 +193,10 @@ class ActivationCapture:
                 values = captured[position][layer_index]
                 if not values:
                     raise RuntimeError(f"selected layer {layer_index} did not run during capture")
-                activation = torch.stack(values).mean(dim=0) if len(values) > 1 else values[0]
+                total_weight = sum(weight for _value, weight in values)
+                weighted = sum(value.float() * weight for value, weight in values) / total_weight
+                dtype = torch.float16 if self.config.dtype == "float16" else torch.float32
+                activation = weighted.to(dtype=dtype)
                 layer_name = self.layers[layer_index][0]
                 filename = f"round-{round_index:03d}-{position}-layer-{layer_index:03d}.pt"
                 path = self.output_dir / filename
@@ -156,6 +222,23 @@ class ActivationCapture:
                 self._atomic_torch_save(path, payload)
                 files[f"{position}/{layer_name}"] = str(path.resolve())
         return result, files
+
+    @staticmethod
+    def _select_chunk_tokens(
+        hidden: Tensor,
+        token_slice: tuple[int | None, int | None],
+        chunk_bounds: tuple[int, int],
+    ) -> Tensor | None:
+        chunk_start, chunk_end = chunk_bounds
+        absolute_start = chunk_start if token_slice[0] is None else token_slice[0]
+        absolute_end = chunk_end if token_slice[1] is None else token_slice[1]
+        overlap_start = max(chunk_start, absolute_start)
+        overlap_end = min(chunk_end, absolute_end)
+        if overlap_start >= overlap_end:
+            return None
+        local_start = overlap_start - chunk_start
+        local_end = overlap_end - chunk_start
+        return hidden[..., local_start:local_end, :]
 
     def _select_tokens(
         self,

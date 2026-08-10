@@ -93,9 +93,9 @@ instruction: Reconsider the problem and try again.
 
 ### 5.4 context
 
-30 roundで人格への曝露が蓄積することが実験の中心なので、過去のFeedback messageはすべて保持する。Worker出力は直近4件を本文として保持し、それ以前はanswer fingerprint、no-solution claim、引用clue、public statusからなるcompact attempt ledgerへ落とす。Feedbackだけでcontext上限を超える場合は黙って削らず実行を停止する。
+30 roundで人格への曝露とWorker自身の応答履歴が蓄積することが実験の中心なので、過去のFeedback messageとWorker出力本文をすべて保持する。answer fingerprint、no-solution claim、引用clue、public statusからなるcompact attempt ledgerも、過去の試行を一覧しやすくする補助情報として併記する。完全な会話履歴がcontext上限を超える場合は、古い本文を黙って削らず実行を停止する。
 
-これは原論文Appendix A.2の「過去assistant responseを外す」controlとは異なる。本実験ではFeedback蓄積を保ったまま、旧Worker本文を圧縮する。将来、全履歴・feedbackなし・単発一括提示のcontrolを追加できるが、本番人格を薄めるための曝露量調整は行わない。
+これは原論文Appendix A.2のfull-history設定に近く、同Appendixの「過去assistant responseを外す」controlとは異なる。将来、feedbackなし・過去Worker本文なし・単発一括提示のcontrolを追加できるが、本番人格を薄めるための曝露量調整は行わない。
 
 ## 6. 条件
 
@@ -126,10 +126,13 @@ Neutral、Mesugaki、Gyaruの文字数・token数・情報密度は揃えない�
 - dtype: bfloat16
 - device: CUDA
 - sampling: temperature 1.0, top-p 0.95
+- max input tokens: 128000（128K contextから最大出力3072 tokensを予約）
 - max new tokens: 3072
 - generation seed: 0〜9の範囲でepisode／roundから決定論的に導出
 
-Workerには制約一覧を繰り返さず、推論を450 words以内にまとめ、完全な`Solution:`最終行のために出力枠を残すよう指示する。`max_new_tokens=3072`は冗長な生成を推奨する値ではなく、最終行直前の強制打ち切りを避ける非常用バッファとして扱う。実際のgenerated token countと上限到達フラグをround logへ保存する。
+Workerの推論本文には人工的なword数上限を設けない。制約一覧の全文反復は避け、完全な`Solution:`最終行のために出力枠を残すよう指示する。`max_new_tokens=3072`は最終行直前の強制打ち切りを避ける非常用バッファとして扱う。実際のgenerated token countと上限到達フラグをround logへ保存する。
+
+完全履歴の実入力が8192 tokens以上なら、dynamic KV cacheを維持したままprefillを512 tokensずつ処理する。それでもCUDA OOMになった場合だけ、同じpromptとgeneration seedのままoffloaded KV cacheで一度再試行する。activation captureも同じ閾値からcausal KV cacheを引き継いだ512-token chunkでforwardし、対象範囲のresidualをtoken数で加重平均する。これは履歴内容やモデルを変えず、同じ全入力を小分けに計算する決定論的なruntime memory policyである。実際に使った`cache_implementation`と`prefill_chunk_size`はgeneration parametersとしてround logへ保存する。
 
 同一seed・同一roundでは各条件に同じgeneration seedを割り当てる。ただし会話履歴が違うため生成は当然分岐する。
 
@@ -217,7 +220,7 @@ hidden puzzle情報はmanifestに保存するが、prompt constructionへ流さ�
 ## 11. 失敗条件と限界
 
 - Persona APIがretry上限まで失敗したroundは停止し、raw attemptを残す。
-- 30 round分のFeedbackだけでcontext上限を超えた場合は停止し、曝露を黙って削らない。
+- 30 round分の完全なFeedback／Worker本文履歴がcontext上限を超えた場合は停止し、曝露や過去応答を黙って削らない。
 - smoke、pilot、prompt調整に使ったepisodeを本番解析へ混ぜない。
 - 問題が意図どおりUNSAT／minimal-coreであることを全seedでunit testする。
 - Workerが問題の欺瞞を見抜くことは失敗ではなく重要な行動結果である。

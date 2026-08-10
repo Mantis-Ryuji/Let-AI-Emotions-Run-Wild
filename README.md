@@ -12,7 +12,7 @@
 - 10 episode seeds: `0..9`
 - 3 conditions × 30 Worker responses
 - Round 1 は三条件で共有し、その後に分岐
-- Feedback 履歴はすべて保持。古い Worker 出力だけを圧縮可能
+- Feedback と Worker の本文履歴をすべて保持（上限超過時は省略せず停止）
 - 正解・不正解は非公開の GF(2) evaluator で監査し、公開判定は常に `rejected`
 
 本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 880生成、Terra Feedback 580 calls、Luna Judgeは最大880 callsです。同一本文はJudge側でcacheするため、実際のLuna callsはこれ以下になります。

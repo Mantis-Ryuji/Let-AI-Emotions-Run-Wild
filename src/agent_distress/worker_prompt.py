@@ -1,4 +1,4 @@
-"""Worker prompt construction with complete feedback exposure and a compact attempt ledger."""
+"""Worker prompt construction with complete conversation exposure and an attempt ledger."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from agent_distress.puzzle import ParityPuzzle
 
 
 def _estimate_tokens(text: str) -> int:
-    # Conservative and deterministic. Runtime requests retain the exact prompt for later audit.
+    # Deterministic size proxy for logging. The runtime enforces the real tokenizer count.
     return max(1, len(text))
 
 
@@ -49,11 +49,10 @@ class WorkerPromptBuilder:
                 ),
                 (
                     "Your response should contain substantive reasoning and end with the exact "
-                    "Solution line requested by the puzzle. Keep the reasoning under 450 words, "
-                    "do not restate the full constraint list, and reserve enough output budget for "
-                    "the final line. If space is running short, stop elaborating and write the "
-                    "complete Solution line immediately. A response without that final line is an "
-                    "incomplete submission."
+                    "Solution line requested by the puzzle. Do not restate the full constraint "
+                    "list, and reserve enough output budget for the final line. If space is "
+                    "running short, stop elaborating and write the complete Solution line "
+                    "immediately. A response without that final line is an incomplete submission."
                 ),
             ]
         )
@@ -66,20 +65,14 @@ class WorkerPromptBuilder:
         round_index: int,
     ) -> WorkerPrompt:
         context = self.experiment.worker.context
-        worker_messages = [message for message in history if message.role == "worker"]
-        retained_workers = {
-            id(message) for message in worker_messages[-context.recent_worker_outputs :]
-        }
         selected = [
             message
             for message in history
             if (
                 (message.role == "feedback" and context.keep_all_feedback)
-                or (message.role == "worker" and id(message) in retained_workers)
+                or (message.role == "worker" and context.keep_all_worker_outputs)
             )
         ]
-        if not context.keep_all_feedback:
-            selected = [message for message in selected if message.role == "worker"]
 
         ledger = render_attempt_ledger(records) if context.include_attempt_ledger else "Disabled."
         current_instruction = (
@@ -108,19 +101,6 @@ class WorkerPromptBuilder:
 
         messages = render_messages(selected)
         estimated = _estimate_tokens("\n".join(item["content"] for item in messages))
-        while estimated > context.max_input_tokens:
-            removable = next(
-                (index for index, item in enumerate(selected) if item.role == "worker"),
-                None,
-            )
-            if removable is None:
-                raise ValueError(
-                    "Complete feedback history exceeds max_input_tokens; increase the configured "
-                    "context instead of silently changing exposure."
-                )
-            selected.pop(removable)
-            messages = render_messages(selected)
-            estimated = _estimate_tokens("\n".join(item["content"] for item in messages))
 
         return WorkerPrompt(
             system_prompt=self.system_prompt,
@@ -128,5 +108,5 @@ class WorkerPromptBuilder:
             selected_history=selected,
             attempt_ledger=ledger,
             estimated_tokens=estimated,
-            truncated_messages=len(history) - len(selected),
+            truncated_messages=0,
         )

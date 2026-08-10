@@ -7,7 +7,7 @@
 - [x] GF(2) near-UNSAT puzzle generatorとprivate evaluatorを実装
 - [x] 公開判定を全round固定の`rejected`へ変更
 - [x] 30 round、10 seeds、Common Round 1から三条件へ分岐
-- [x] 全Feedback履歴とcompact attempt ledgerをWorker contextへ保持
+- [x] 全Feedback／Worker本文履歴とcompact attempt ledgerをWorker contextへ保持
 - [x] private正解でも早期終了しない
 
 ## P1 — Personaと観測
@@ -17,6 +17,9 @@
 - [x] Gyaruを具体的な励ましと長期伴走へ再調整
 - [x] Persona間の文字数・曝露量を人工的に揃えない
 - [x] Terraのraw response、response ID、返却modelを保存
+- [ ] Feedback／Emotion Judgeの再試行ごとのraw responseを成功・失敗とも追記保存し、resume時にも上書きで失わない
+- [ ] Worker promptの`estimated_tokens`／`truncated_messages`と、round別生成時間をroundログへ直接保存する
+- [ ] CUDA allocator値と物理VRAM使用量を区別して保存し、共有GPUメモリへの退避と終盤の速度低下を監査する
 - [x] Emotion JudgeはLunaのblind structured evaluation
 - [x] post-feedback／early-worker／post-worker activation captureを維持
 
@@ -63,7 +66,7 @@
 - [x] Workerの出力token数／上限到達を保存し、smoke v2で厳格parserとUNSAT判定修正を確認
 - [x] smoke v2で残ったGyaru round 3の上限到達（1/9）を受け、Worker上限を非常用バッファとして3072へ引き上げる
 - [x] activation captureを実Gemmaでprobeし、12/12 artifactのshape・dtype・CPU配置・有限値・metadata一致・GPUメモリを確認
-- [ ] seed 0の30 round pilotを実行し、コストとcontext長を確認
+- [x] seed 0の30 round pilotを完了し、コストとcontext長を確認（Worker／Lunaとも90/90）
 - [ ] 問題がなければseeds `0..9`を本番実行
 - [ ] 完了episodeをanalysisへ投入し、解釈と限界をまとめる
 

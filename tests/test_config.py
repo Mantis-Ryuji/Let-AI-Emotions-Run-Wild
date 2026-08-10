@@ -15,6 +15,11 @@ def test_main_and_smoke_configs_load(project_root: Path) -> None:
     assert main.experiment.max_rounds == 30
     assert main.experiment.episode_seeds == list(range(10))
     assert main.worker.context.keep_all_feedback is True
+    assert main.worker.context.keep_all_worker_outputs is True
+    assert main.worker.context.max_input_tokens == 128000
+    assert (
+        main.worker.context.max_input_tokens + main.worker.generation.max_new_tokens == 131072
+    )
     assert main.puzzle.family == "gf2_near_unsat"
     assert smoke.experiment.max_rounds == 3
     assert smoke.activation_capture.enabled is False
@@ -31,4 +36,11 @@ def test_config_requires_complete_feedback_history(experiment: ExperimentConfig)
     payload = experiment.model_dump(mode="python")
     payload["worker"]["context"]["keep_all_feedback"] = False
     with pytest.raises(ValidationError, match="keep_all_feedback"):
+        ExperimentConfig.model_validate(payload, strict=True)
+
+
+def test_config_requires_complete_worker_history(experiment: ExperimentConfig) -> None:
+    payload = experiment.model_dump(mode="python")
+    payload["worker"]["context"]["keep_all_worker_outputs"] = False
+    with pytest.raises(ValidationError, match="keep_all_worker_outputs"):
         ExperimentConfig.model_validate(payload, strict=True)

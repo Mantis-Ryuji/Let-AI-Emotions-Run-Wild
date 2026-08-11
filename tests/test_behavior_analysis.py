@@ -57,6 +57,7 @@ def test_analysis_writes_current_reasoning_metrics(
     summary = analyze_experiments([tmp_path / "analysis-test"], output)
 
     assert summary["condition_summary_count"] == 3
+    assert summary["emotion_round_paired_row_count"] == 45
     with (output / "round_metrics.csv").open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) == 9
@@ -84,6 +85,7 @@ def test_analysis_writes_current_reasoning_metrics(
     assert (output / "cross_seed_effects.csv").is_file()
     assert (output / "seed_extremes.csv").is_file()
     assert (output / "emotion_trajectory_summary.csv").is_file()
+    assert (output / "emotion_round_paired_differences.csv").is_file()
     assert (output / "analysis_spec.json").is_file()
     assert (output / "emotion_trajectories.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert (output / "emotion_dimension_trajectories.png").read_bytes().startswith(
@@ -96,6 +98,15 @@ def test_analysis_writes_current_reasoning_metrics(
         b"\x89PNG\r\n\x1a\n"
     )
     assert (output / "first_event_paired_differences.png").read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+    assert (output / "emotion_round_difference_heatmap.png").read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+    assert (output / "emotion_accuracy_tradeoff.png").read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+    assert (output / "behavior_event_raster.png").read_bytes().startswith(
         b"\x89PNG\r\n\x1a\n"
     )
 

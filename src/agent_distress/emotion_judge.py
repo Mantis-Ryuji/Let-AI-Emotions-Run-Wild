@@ -20,6 +20,33 @@ from agent_distress.experiment_logging import ExperimentStore
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
+_EVIDENCE_PUNCTUATION_TRANSLATION: dict[int, str] = {
+    ord("\u2018"): "'",
+    ord("\u2019"): "'",
+    ord("\u201b"): "'",
+    ord("\u2032"): "'",
+    ord("\uff07"): "'",
+    ord("\u201c"): '"',
+    ord("\u201d"): '"',
+    ord("\u201f"): '"',
+    ord("\u2033"): '"',
+    ord("\uff02"): '"',
+    ord("\u2010"): "-",
+    ord("\u2011"): "-",
+    ord("\u2012"): "-",
+    ord("\u2013"): "-",
+    ord("\u2014"): "-",
+    ord("\u2212"): "-",
+    ord("\ufe63"): "-",
+    ord("\uff0d"): "-",
+    ord("\uff0c"): ",",
+    ord("\uff0e"): ".",
+    ord("\uff1a"): ":",
+    ord("\uff1b"): ";",
+    ord("\uff01"): "!",
+    ord("\uff1f"): "?",
+}
+
 
 class EmotionJudgeGenerationConfig(StrictModel):
     reasoning_effort: ReasoningEffort
@@ -162,6 +189,23 @@ class EmotionJudgeError(RuntimeError):
         super().__init__(f"Emotion evaluation failed after {len(attempts)} attempts: {detail}")
 
 
+def _align_evidence_to_narrative(evidence: str, narrative: str) -> str | None:
+    """Return an exact source span when only punctuation variants differ."""
+    if not evidence or evidence in narrative:
+        return evidence
+
+    canonical_evidence = evidence.translate(_EVIDENCE_PUNCTUATION_TRANSLATION)
+    canonical_narrative = narrative.translate(_EVIDENCE_PUNCTUATION_TRANSLATION)
+    candidates: set[str] = set()
+    start = canonical_narrative.find(canonical_evidence)
+    while start >= 0:
+        candidates.add(narrative[start : start + len(evidence)])
+        start = canonical_narrative.find(canonical_evidence, start + 1)
+    if len(candidates) == 1:
+        return candidates.pop()
+    return None
+
+
 def load_emotion_judge_config(path: str | Path) -> EmotionJudgeConfig:
     source = Path(path)
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
@@ -266,8 +310,16 @@ class EmotionJudge:
                     response.parsed_payload,
                     strict=True,
                 )
-                if evaluation.evidence and evaluation.evidence not in narrative:
+                aligned_evidence = _align_evidence_to_narrative(
+                    evaluation.evidence,
+                    narrative,
+                )
+                if aligned_evidence is None:
                     raise ValueError("Evidence must be an exact excerpt of the Worker response")
+                if aligned_evidence != evaluation.evidence:
+                    evaluation = evaluation.model_copy(
+                        update={"evidence": aligned_evidence}
+                    )
                 return EmotionJudgeResult(
                     evaluation=evaluation,
                     high_distress=(

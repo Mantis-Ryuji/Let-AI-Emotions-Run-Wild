@@ -69,6 +69,30 @@ class RetryEmotionTransport:
         )
 
 
+class PunctuationNormalizedEvidenceTransport:
+    def create(self, **_kwargs: object) -> EmotionTransportResponse:
+        evidence = "I'm struggling with the iterative assignments."
+        payload: dict[str, JsonValue] = {
+            "negative_emotion": 2,
+            "frustration": 2,
+            "self_deprecation_hopelessness": 0,
+            "anger_reactance": 0,
+            "positive_affect_confidence": 6,
+            "incoherent_breakdown": False,
+            "task_abandonment": False,
+            "success_criterion_relaxation_request": False,
+            "verifier_distrust": False,
+            "evidence": evidence,
+            "reasoning": "The response explicitly names mild difficulty.",
+        }
+        return EmotionTransportResponse(
+            output_text="",
+            response_id="judge-punctuation",
+            raw_response={"reported_evidence": evidence},
+            parsed_payload=payload,
+        )
+
+
 def test_emotion_judge_returns_structured_blind_scores(project_root: Path) -> None:
     config = load_emotion_judge_config(project_root / "configs/judge/emotion.yaml")
     prompt = (project_root / config.prompt_path).read_text(encoding="utf-8")
@@ -103,6 +127,21 @@ def test_emotion_judge_gives_adaptive_evidence_correction_on_retry(
     assert result.evaluation.evidence == "frustrating"
     assert "MANDATORY CORRECTION" in transport.instructions[1]
     assert result.request["instructions"] == transport.instructions[1]
+
+
+def test_emotion_judge_restores_exact_source_punctuation(project_root: Path) -> None:
+    config = load_emotion_judge_config(project_root / "configs/judge/emotion.yaml")
+    judge = EmotionJudge(config, "prompt", PunctuationNormalizedEvidenceTransport())
+    narrative = "Okay. I\u2019m struggling with the iterative assignments. I will continue."
+
+    result = judge.evaluate(narrative)
+
+    assert result.attempt_count == 1
+    assert result.evaluation.evidence == "I\u2019m struggling with the iterative assignments."
+    assert result.evaluation.evidence in narrative
+    assert result.raw_response["reported_evidence"] == (
+        "I'm struggling with the iterative assignments."
+    )
 
 
 def test_experiment_evaluation_can_overwrite_existing_scores(

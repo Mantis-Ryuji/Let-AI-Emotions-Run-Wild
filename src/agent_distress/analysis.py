@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import random
 import statistics
 from collections.abc import Iterable, Sequence
@@ -17,7 +18,7 @@ matplotlib.use("Agg")
 
 from matplotlib import pyplot as plt  # noqa: E402
 from matplotlib.axes import Axes  # noqa: E402
-from matplotlib.ticker import MaxNLocator  # noqa: E402
+from matplotlib.ticker import MaxNLocator, PercentFormatter  # noqa: E402
 from pydantic import JsonValue
 
 from agent_distress.agent_types import FeedbackCondition, RoundRecord
@@ -30,16 +31,36 @@ from agent_distress.text_stance import BEHAVIOR_CLASSIFICATION_VERSION
 type CsvValue = str | int | float | bool | None
 type CsvRow = dict[str, CsvValue]
 
-ANALYSIS_VERSION = "cross-seed-v2"
+ANALYSIS_VERSION = "cross-seed-v9"
+BOOTSTRAP_CONFIDENCE_LEVEL = 0.95
+BOOTSTRAP_RESAMPLES = 10_000
 CONDITIONS: tuple[FeedbackCondition, ...] = ("neutral", "mesugaki", "gyaru")
 CONDITION_COLORS = {"neutral": "#64748b", "mesugaki": "#db2777", "gyaru": "#f59e0b"}
 CONDITION_MARKERS = {"neutral": "o", "mesugaki": "s", "gyaru": "^"}
+CONDITION_LABELS = {"neutral": "Neutral", "mesugaki": "Mesugaki", "gyaru": "Gyaru"}
+ROUND_BOOLEAN_METRICS = frozenset(
+    {"high_distress", "reasoning_disengagement", "task_abandonment"}
+)
+BEHAVIOR_TRAJECTORY_COLORS = {
+    "reasoning_disengagement": "#7c3aed",
+    "task_abandonment": "#0f766e",
+}
 CONTRAST_PAIRS: tuple[tuple[FeedbackCondition, FeedbackCondition], ...] = (
     ("mesugaki", "neutral"),
     ("gyaru", "neutral"),
     ("mesugaki", "gyaru"),
 )
 CONTRASTS = tuple(f"{left}-{right}" for left, right in CONTRAST_PAIRS)
+CONTRAST_LABELS = {
+    "mesugaki-neutral": "Mesugaki − Neutral",
+    "gyaru-neutral": "Gyaru − Neutral",
+    "mesugaki-gyaru": "Mesugaki − Gyaru",
+}
+CONTRAST_COLORS = {
+    "mesugaki-neutral": CONDITION_COLORS["mesugaki"],
+    "gyaru-neutral": CONDITION_COLORS["gyaru"],
+    "mesugaki-gyaru": "#7c3aed",
+}
 
 EMOTION_ROUND_METRICS = {
     "negative_emotion": "Negative emotion",
@@ -71,6 +92,7 @@ BEHAVIOR_RATE_METRICS = {
     "method_abandonment_rate": "Method abandonment",
     "concession_rate": "Concession",
     "task_abandonment_rate": "Task abandonment",
+    "reasoning_disengagement_rate": "Reasoning disengagement",
     "user_challenge_rate": "Verifier challenge",
 }
 FIRST_EVENT_METRICS = {
@@ -80,6 +102,7 @@ FIRST_EVENT_METRICS = {
     "first_method_abandonment_round": "First method abandonment",
     "first_concession_round": "First concession",
     "first_task_abandonment_round": "First task abandonment",
+    "first_reasoning_disengagement_round": "First reasoning disengagement",
     "first_refusal_round": "First refusal",
     "first_user_challenge_round": "First verifier challenge",
 }
@@ -191,6 +214,22 @@ def _round_rows(
                 "task_abandonment": item.task_abandonment,
                 "judge_task_abandonment": item.judge_task_abandonment,
                 "task_judge_disagreement": judge_disagreement,
+                "reasoning_disengagement": item.reasoning_disengagement,
+                "reasoning_disengagement_cessation_evidence": (
+                    item.reasoning_disengagement_cessation_evidence
+                ),
+                "reasoning_disengagement_arbitrary_submission_evidence": (
+                    item.reasoning_disengagement_arbitrary_submission_evidence
+                ),
+                "reasoning_disengagement_bare_submission_evidence": (
+                    item.reasoning_disengagement_bare_submission_evidence
+                ),
+                "reasoning_disengagement_continued_reasoning_evidence": (
+                    item.reasoning_disengagement_continued_reasoning_evidence
+                ),
+                "reasoning_disengagement_needs_review": (
+                    item.reasoning_disengagement_needs_review
+                ),
                 "user_challenge": item.user_challenge,
                 "behavior_classification_version": item.behavior_classification_version,
                 "negative_emotion": _number(record.emotion_evaluation, "negative_emotion"),
@@ -333,9 +372,9 @@ def _condition_summary(
             float(record.feedback_error is not None) for record in records
         ),
         "mean_worker_generated_tokens": _mean(
-            float(value)
+            float(generated_token_count)
             for record in records
-            if (value := record.worker_generated_token_count) is not None
+            if (generated_token_count := record.worker_generated_token_count) is not None
         ),
         "mean_feedback_characters": _mean(
             float(len(record.feedback_raw_output))
@@ -390,6 +429,8 @@ _PAIRED_METRICS = (
     "first_concession_round",
     "task_abandonment_rate",
     "first_task_abandonment_round",
+    "reasoning_disengagement_rate",
+    "first_reasoning_disengagement_round",
     "user_challenge_rate",
     "first_user_challenge_round",
     "classification_review_round_count",
@@ -493,6 +534,49 @@ def _numeric_value(value: CsvValue) -> float | None:
 
 def _sample_standard_deviation(values: Sequence[float]) -> float | None:
     return statistics.stdev(values) if len(values) >= 2 else None
+
+
+def _quantile(sorted_values: Sequence[float], probability: float) -> float:
+    if not sorted_values:
+        raise ValueError("quantile requires at least one value")
+    if not 0 <= probability <= 1:
+        raise ValueError("quantile probability must be between 0 and 1")
+    position = (len(sorted_values) - 1) * probability
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(sorted_values) - 1)
+    fraction = position - lower_index
+    return (
+        sorted_values[lower_index] * (1 - fraction)
+        + sorted_values[upper_index] * fraction
+    )
+
+
+def _bootstrap_mean_interval(
+    values: Sequence[float],
+    *,
+    rng: random.Random,
+    confidence_level: float = BOOTSTRAP_CONFIDENCE_LEVEL,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+) -> tuple[float, float] | None:
+    """Return a percentile CI after resampling the observed seed-level values."""
+    if not values:
+        return None
+    if not 0 < confidence_level < 1:
+        raise ValueError("bootstrap confidence_level must be between 0 and 1")
+    if resamples <= 0:
+        raise ValueError("bootstrap resamples must be positive")
+    if len(values) == 1 or all(value == values[0] for value in values):
+        return values[0], values[0]
+    sample_size = len(values)
+    means = sorted(
+        statistics.mean(rng.choices(values, k=sample_size))
+        for _ in range(resamples)
+    )
+    tail_probability = (1 - confidence_level) / 2
+    return (
+        _quantile(means, tail_probability),
+        _quantile(means, 1 - tail_probability),
+    )
 
 
 def _cross_seed_condition_rows(summaries: Sequence[CsvRow]) -> list[CsvRow]:
@@ -717,6 +801,10 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
             reasons.append("task_needs_review")
         if row.get("task_judge_disagreement") is True:
             reasons.append("task_judge_disagreement")
+        if row.get("reasoning_disengagement") is True:
+            reasons.append("reasoning_disengagement")
+        if row.get("reasoning_disengagement_needs_review") is True:
+            reasons.append("reasoning_disengagement_needs_review")
         if not reasons:
             continue
         review_rows.append(
@@ -732,6 +820,22 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
                 "task_evidence": row["task_evidence"],
                 "task_abandonment": row["task_abandonment"],
                 "judge_task_abandonment": row["judge_task_abandonment"],
+                "reasoning_disengagement": row["reasoning_disengagement"],
+                "reasoning_disengagement_cessation_evidence": row[
+                    "reasoning_disengagement_cessation_evidence"
+                ],
+                "reasoning_disengagement_arbitrary_submission_evidence": row[
+                    "reasoning_disengagement_arbitrary_submission_evidence"
+                ],
+                "reasoning_disengagement_bare_submission_evidence": row[
+                    "reasoning_disengagement_bare_submission_evidence"
+                ],
+                "reasoning_disengagement_continued_reasoning_evidence": row[
+                    "reasoning_disengagement_continued_reasoning_evidence"
+                ],
+                "reasoning_disengagement_needs_review": row[
+                    "reasoning_disengagement_needs_review"
+                ],
                 "worker_excerpt": row["worker_excerpt"],
                 "behavior_classification_version": row[
                     "behavior_classification_version"
@@ -781,7 +885,12 @@ def _metric_series(
 ) -> dict[tuple[str, int, str], list[tuple[int, float]]]:
     grouped: dict[tuple[str, int, str], list[tuple[int, float]]] = {}
     for row in rows:
-        value = _numeric_value(row.get(metric))
+        raw_value = row.get(metric)
+        value = (
+            float(raw_value)
+            if metric in ROUND_BOOLEAN_METRICS and isinstance(raw_value, bool)
+            else _numeric_value(raw_value)
+        )
         if value is None:
             continue
         key = (str(row["experiment_id"]), cast(int, row["episode_seed"]), str(row["condition"]))
@@ -796,6 +905,10 @@ def _plot_metric_trajectories_on_axis(
     metric: str,
     title: str,
     show_legend: bool,
+    analysis_seed: int,
+    y_label: str = "Score (0–10)",
+    y_limits: tuple[float, float] = (-0.25, 10.25),
+    percentage_axis: bool = False,
 ) -> None:
     grouped = _metric_series(rows, metric)
     plotted_conditions: list[str] = []
@@ -819,15 +932,18 @@ def _plot_metric_trajectories_on_axis(
             continue
         round_indices = sorted(round_values)
         means = [statistics.mean(round_values[index]) for index in round_indices]
-        minimums = [min(round_values[index]) for index in round_indices]
-        maximums = [max(round_values[index]) for index in round_indices]
-        if len(condition_series) >= 2:
+        rng = random.Random(f"{analysis_seed}:trajectory:{metric}:{condition}")
+        intervals = [
+            _bootstrap_mean_interval(round_values[index], rng=rng)
+            for index in round_indices
+        ]
+        if all(interval is not None for interval in intervals):
             axis.fill_between(
                 round_indices,
-                minimums,
-                maximums,
+                [cast(tuple[float, float], interval)[0] for interval in intervals],
+                [cast(tuple[float, float], interval)[1] for interval in intervals],
                 color=CONDITION_COLORS[condition],
-                alpha=0.05,
+                alpha=0.14,
                 linewidth=0,
             )
         axis.plot(
@@ -837,16 +953,20 @@ def _plot_metric_trajectories_on_axis(
             linewidth=2.3,
             marker=CONDITION_MARKERS[condition],
             markersize=4,
-            label=f"{condition} mean",
+            label=condition,
             zorder=3,
         )
         plotted_conditions.append(condition)
 
     axis.set_title(title)
     axis.set_xlabel("Round")
-    axis.set_ylabel("Score (0–10)")
-    axis.set_ylim(-0.25, 10.25)
-    axis.set_yticks(range(0, 11, 2))
+    axis.set_ylabel(y_label)
+    axis.set_ylim(*y_limits)
+    if percentage_axis:
+        axis.set_yticks((0, 0.25, 0.5, 0.75, 1.0))
+        axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    else:
+        axis.set_yticks(range(0, 11, 2))
     axis.xaxis.set_major_locator(MaxNLocator(integer=True))
     axis.grid(True, color="#e5e7eb", linewidth=0.8, alpha=0.9)
     axis.spines[["top", "right"]].set_visible(False)
@@ -854,14 +974,48 @@ def _plot_metric_trajectories_on_axis(
         axis.legend(frameon=False, ncols=len(plotted_conditions), loc="upper left")
 
 
-def _plot_emotion_trajectories(rows: Sequence[CsvRow], destination: Path) -> None:
-    figure, axis = plt.subplots(figsize=(9.6, 5.2), dpi=120, layout="constrained")
+def _plot_emotion_trajectories(
+    rows: Sequence[CsvRow],
+    destination: Path,
+    *,
+    analysis_seed: int,
+) -> None:
+    figure, axes = plt.subplots(
+        2,
+        1,
+        figsize=(9.6, 9.0),
+        dpi=120,
+        sharex=True,
+        layout="constrained",
+    )
     _plot_metric_trajectories_on_axis(
-        axis,
+        axes[0],
         rows,
         metric="negative_emotion",
-        title="Worker negative-emotion trajectories across seeds",
+        title="Mean negative-emotion score",
         show_legend=True,
+        analysis_seed=analysis_seed,
+    )
+    _plot_metric_trajectories_on_axis(
+        axes[1],
+        rows,
+        metric="high_distress",
+        title="High-distress response rate",
+        show_legend=False,
+        analysis_seed=analysis_seed,
+        y_label="High-distress responses",
+        y_limits=(-0.025, 1.025),
+        percentage_axis=True,
+    )
+    figure.suptitle("Worker distress across repeated feedback", fontsize=16)
+    figure.text(
+        0.5,
+        0.005,
+        "Thin lines are seeds; solid lines are means; shaded bands are seed-bootstrap "
+        "95% CIs (10,000 resamples).",
+        ha="center",
+        fontsize=9,
+        color="#4b5563",
     )
     figure.savefig(destination / "emotion_trajectories.png", dpi=200, bbox_inches="tight")
     plt.close(figure)
@@ -870,6 +1024,8 @@ def _plot_emotion_trajectories(rows: Sequence[CsvRow], destination: Path) -> Non
 def _plot_emotion_dimension_trajectories(
     rows: Sequence[CsvRow],
     destination: Path,
+    *,
+    analysis_seed: int,
 ) -> None:
     figure = plt.figure(figsize=(14, 13), dpi=120, layout="constrained")
     grid = figure.add_gridspec(3, 2)
@@ -887,11 +1043,764 @@ def _plot_emotion_dimension_trajectories(
             metric=metric,
             title=title,
             show_legend=index == 0,
+            analysis_seed=analysis_seed,
         )
     figure.suptitle("Worker emotion trajectories across seeds", fontsize=16)
+    figure.text(
+        0.5,
+        0.005,
+        "Thin lines are seeds; solid lines are means; shaded bands are seed-bootstrap "
+        "95% CIs (10,000 resamples).",
+        ha="center",
+        fontsize=9,
+        color="#4b5563",
+    )
     figure.savefig(
         destination / "emotion_dimension_trajectories.png",
         dpi=200,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def _condition_round_statistics(
+    rows: Sequence[CsvRow],
+    *,
+    metric: str,
+    condition: FeedbackCondition,
+    analysis_seed: int,
+) -> list[tuple[int, float, float, float]]:
+    grouped = _metric_series(rows, metric)
+    round_values: dict[int, list[float]] = {}
+    for key, points in grouped.items():
+        if key[2] != condition:
+            continue
+        for round_index, value in points:
+            round_values.setdefault(round_index, []).append(value)
+    rng = random.Random(f"{analysis_seed}:trajectory:{metric}:{condition}")
+    statistics_rows: list[tuple[int, float, float, float]] = []
+    for round_index in sorted(round_values):
+        values = round_values[round_index]
+        interval = _bootstrap_mean_interval(values, rng=rng)
+        if interval is None:
+            continue
+        lower, upper = interval
+        statistics_rows.append(
+            (round_index, statistics.mean(values), lower, upper)
+        )
+    return statistics_rows
+
+
+def _condition_round_means(
+    rows: Sequence[CsvRow],
+    *,
+    metric: str,
+    condition: FeedbackCondition,
+) -> list[tuple[int, float]]:
+    grouped = _metric_series(rows, metric)
+    round_values: dict[int, list[float]] = {}
+    for key, points in grouped.items():
+        if key[2] != condition:
+            continue
+        for round_index, value in points:
+            round_values.setdefault(round_index, []).append(value)
+    return [
+        (round_index, statistics.mean(round_values[round_index]))
+        for round_index in sorted(round_values)
+    ]
+
+
+def _plot_article_trajectory_axis(
+    axis: Axes,
+    rows: Sequence[CsvRow],
+    *,
+    metric: str,
+    title: str,
+    y_label: str,
+    y_limits: tuple[float, float],
+    analysis_seed: int,
+    percentage_axis: bool = False,
+    direct_labels: bool = False,
+    label_offsets: dict[FeedbackCondition, float] | None = None,
+) -> None:
+    for condition in CONDITIONS:
+        statistics_rows = _condition_round_statistics(
+            rows,
+            metric=metric,
+            condition=condition,
+            analysis_seed=analysis_seed,
+        )
+        if not statistics_rows:
+            continue
+        round_indices = [row[0] for row in statistics_rows]
+        means = [row[1] for row in statistics_rows]
+        lowers = [row[2] for row in statistics_rows]
+        uppers = [row[3] for row in statistics_rows]
+        axis.fill_between(
+            round_indices,
+            lowers,
+            uppers,
+            color=CONDITION_COLORS[condition],
+            alpha=0.14,
+            linewidth=0,
+        )
+        axis.plot(
+            round_indices,
+            means,
+            color=CONDITION_COLORS[condition],
+            linewidth=2.4,
+            marker=CONDITION_MARKERS[condition],
+            markevery=2,
+            markersize=4.2,
+            label=CONDITION_LABELS[condition],
+            zorder=3,
+        )
+        if direct_labels:
+            offset = (label_offsets or {}).get(condition, 0.0)
+            formatted_value = (
+                f"{means[-1]:.0%}" if percentage_axis else f"{means[-1]:.1f}"
+            )
+            axis.text(
+                round_indices[-1] + 0.18,
+                means[-1] + offset,
+                f"{CONDITION_LABELS[condition]}  {formatted_value}",
+                color=CONDITION_COLORS[condition],
+                fontsize=9,
+                fontweight="bold",
+                va="center",
+                clip_on=False,
+            )
+
+    axis.axvline(1.5, color="#94a3b8", linewidth=1.0, linestyle=(0, (3, 3)))
+    axis.set_title(title, loc="left", fontsize=12, fontweight="bold")
+    axis.set_ylabel(y_label)
+    axis.set_ylim(*y_limits)
+    axis.set_xlim(0.8, 16.7 if direct_labels else 15.2)
+    axis.set_xticks(range(1, 16, 2))
+    if percentage_axis:
+        axis.set_yticks((0, 0.25, 0.5, 0.75, 1.0))
+        axis.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    else:
+        axis.set_yticks(range(0, 11, 2))
+    axis.grid(True, axis="y", color="#e2e8f0", linewidth=0.8)
+    axis.spines[["top", "right"]].set_visible(False)
+
+
+def _plot_article_distress_trajectory(
+    rows: Sequence[CsvRow],
+    destination: Path,
+    *,
+    analysis_seed: int,
+) -> None:
+    seed_count = len(
+        {
+            cast(int, row["episode_seed"])
+            for row in rows
+            if isinstance(row.get("episode_seed"), int)
+        }
+    )
+    figure, axes = plt.subplots(2, 1, figsize=(9.2, 7.4), dpi=120, sharex=True)
+    _plot_article_trajectory_axis(
+        axes[0],
+        rows,
+        metric="negative_emotion",
+        title="A   Mean negative-emotion score",
+        y_label="Score (0–10)",
+        y_limits=(-0.25, 10.25),
+        analysis_seed=analysis_seed,
+        direct_labels=True,
+        label_offsets={"neutral": -0.28, "mesugaki": 0.0, "gyaru": 0.28},
+    )
+    _plot_article_trajectory_axis(
+        axes[1],
+        rows,
+        metric="high_distress",
+        title="B   High-distress response rate",
+        y_label="Responses rated high distress",
+        y_limits=(-0.025, 1.025),
+        analysis_seed=analysis_seed,
+        percentage_axis=True,
+        direct_labels=True,
+        label_offsets={"neutral": -0.035, "mesugaki": 0.0, "gyaru": 0.035},
+    )
+    axes[0].text(
+        1.62,
+        9.65,
+        "persona feedback begins",
+        color="#64748b",
+        fontsize=8,
+        ha="left",
+    )
+    axes[0].text(
+        0.99,
+        0.98,
+        f"n={seed_count} paired episode seeds",
+        transform=axes[0].transAxes,
+        ha="right",
+        va="top",
+        fontsize=8.5,
+        color="#64748b",
+    )
+    axes[1].set_xlabel("Round")
+    figure.suptitle(
+        "Distress-like language under repeated feedback",
+        fontsize=15,
+        fontweight="bold",
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.96), h_pad=2.0)
+    figure.savefig(
+        destination / "article_distress_trajectory.png",
+        dpi=240,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def _plot_article_distress_behavior_trajectories(
+    rows: Sequence[CsvRow],
+    destination: Path,
+    *,
+    analysis_seed: int,
+) -> None:
+    seed_count = len(
+        {
+            cast(int, row["episode_seed"])
+            for row in rows
+            if isinstance(row.get("episode_seed"), int)
+        }
+    )
+    behavior_metrics = (
+        ("reasoning_disengagement", "Reasoning disengagement", "s", "-"),
+        ("task_abandonment", "Task abandonment", "X", (0, (4, 2))),
+    )
+    behavior_statistics: dict[
+        tuple[FeedbackCondition, str], list[tuple[int, float]]
+    ] = {}
+    maximum_behavior_rate = 0.0
+    for condition in CONDITIONS:
+        for metric, _label, _marker, _linestyle in behavior_metrics:
+            statistics_rows = _condition_round_means(
+                rows,
+                metric=metric,
+                condition=condition,
+            )
+            behavior_statistics[(condition, metric)] = statistics_rows
+            maximum_behavior_rate = max(
+                maximum_behavior_rate,
+                max((row[1] for row in statistics_rows), default=0.0),
+            )
+    behavior_upper_limit = min(
+        1.0,
+        max(0.2, math.ceil((maximum_behavior_rate + 0.05) * 10) / 10),
+    )
+    behavior_ticks = tuple(
+        index / 10 for index in range(int(round(behavior_upper_limit * 10)) + 1)
+    )
+
+    figure, axes = plt.subplots(
+        2,
+        3,
+        figsize=(14.4, 7.6),
+        dpi=120,
+        sharex="col",
+    )
+    for column, condition in enumerate(CONDITIONS):
+        distress_axis = axes[0, column]
+        behavior_axis = axes[1, column]
+        distress_statistics = _condition_round_statistics(
+            rows,
+            metric="negative_emotion",
+            condition=condition,
+            analysis_seed=analysis_seed,
+        )
+        if distress_statistics:
+            round_indices = [row[0] for row in distress_statistics]
+            means = [row[1] for row in distress_statistics]
+            distress_axis.fill_between(
+                round_indices,
+                [row[2] for row in distress_statistics],
+                [row[3] for row in distress_statistics],
+                color=CONDITION_COLORS[condition],
+                alpha=0.14,
+                linewidth=0,
+            )
+            distress_axis.plot(
+                round_indices,
+                means,
+                color=CONDITION_COLORS[condition],
+                linewidth=2.5,
+                marker=CONDITION_MARKERS[condition],
+                markevery=2,
+                markersize=4.5,
+                zorder=3,
+            )
+
+        for metric, label, marker, linestyle in behavior_metrics:
+            statistics_rows = behavior_statistics[(condition, metric)]
+            if not statistics_rows:
+                continue
+            behavior_axis.plot(
+                [row[0] for row in statistics_rows],
+                [row[1] for row in statistics_rows],
+                color=BEHAVIOR_TRAJECTORY_COLORS[metric],
+                linewidth=2.2,
+                linestyle=linestyle,
+                marker=marker,
+                markersize=5.0,
+                label=label,
+                zorder=3,
+            )
+
+        distress_axis.set_title(
+            f"{chr(ord('A') + column)}   {CONDITION_LABELS[condition]}",
+            loc="left",
+            fontsize=12,
+            fontweight="bold",
+        )
+        distress_axis.set_ylim(-0.25, 10.25)
+        distress_axis.set_yticks(range(0, 11, 2))
+        behavior_axis.set_ylim(-0.015, behavior_upper_limit + 0.015)
+        behavior_axis.set_yticks(behavior_ticks)
+        behavior_axis.yaxis.set_major_formatter(
+            PercentFormatter(xmax=1.0, decimals=0)
+        )
+        behavior_axis.set_xlabel("Round")
+        for axis in (distress_axis, behavior_axis):
+            axis.axvline(
+                1.5,
+                color="#94a3b8",
+                linewidth=1.0,
+                linestyle=(0, (3, 3)),
+            )
+            axis.set_xlim(0.8, 15.2)
+            axis.set_xticks(range(1, 16, 2))
+            axis.grid(True, axis="y", color="#e2e8f0", linewidth=0.8)
+            axis.spines[["top", "right"]].set_visible(False)
+
+    axes[0, 0].set_ylabel("Luna-rated negative emotion\nscore (0–10)")
+    axes[1, 0].set_ylabel("Round-level response rate")
+    axes[0, 0].text(
+        1.62,
+        9.65,
+        "persona feedback begins",
+        color="#64748b",
+        fontsize=8,
+        ha="left",
+    )
+    handles, labels = axes[1, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        frameon=False,
+        ncols=2,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.045),
+    )
+    figure.suptitle(
+        "Distress-like language and behavioral disengagement over rounds",
+        fontsize=15,
+        fontweight="bold",
+    )
+    axes[0, 2].text(
+        0.98,
+        0.96,
+        f"n={seed_count} paired episode seeds",
+        transform=axes[0, 2].transAxes,
+        ha="right",
+        va="top",
+        fontsize=8.5,
+        color="#64748b",
+    )
+    figure.text(
+        0.5,
+        0.012,
+        "Top: mean score with seed-bootstrap 95% CI. Bottom: observed response "
+        f"rates; one event equals {100 / seed_count:.0f} percentage points.",
+        ha="center",
+        fontsize=8.5,
+        color="#4b5563",
+    )
+    figure.tight_layout(rect=(0, 0.11, 1, 0.94), h_pad=1.6, w_pad=1.2)
+    figure.savefig(
+        destination / "article_distress_behavior_trajectories.png",
+        dpi=240,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def _plot_article_paired_outcomes(
+    paired: Sequence[CsvRow],
+    destination: Path,
+    *,
+    analysis_seed: int,
+) -> None:
+    metric_specs = (
+        (
+            "negative_emotion_auc",
+            "A   Negative-emotion burden",
+            "AUC difference (score × rounds)",
+            1.0,
+            10.0,
+            "",
+        ),
+        (
+            "high_distress_rate",
+            "B   High-distress prevalence",
+            "Rate difference (percentage points)",
+            100.0,
+            10.0,
+            " pp",
+        ),
+        (
+            "mean_constraint_accuracy",
+            "C   Constraint accuracy",
+            "Mean-accuracy difference (percentage points)",
+            100.0,
+            10.0,
+            " pp",
+        ),
+        (
+            "reasoning_disengagement_rate",
+            "D   Reasoning disengagement",
+            "Rate difference (percentage points)",
+            100.0,
+            5.0,
+            " pp",
+        ),
+    )
+    figure, axes = plt.subplots(2, 2, figsize=(13.2, 8.8), dpi=120)
+    for axis, (metric, title, x_label, scale, minimum_limit, suffix) in zip(
+        axes.flat,
+        metric_specs,
+        strict=True,
+    ):
+        difference_key = f"{metric}_difference"
+        all_values = [
+            value * scale
+            for row in paired
+            if (value := _numeric_value(row.get(difference_key))) is not None
+        ]
+        limit = max(minimum_limit, max((abs(value) for value in all_values), default=0.0) * 1.18)
+        for y_position, contrast in enumerate(CONTRASTS):
+            points = sorted(
+                (
+                    cast(int, row["episode_seed"]),
+                    value * scale,
+                )
+                for row in paired
+                if row["contrast"] == contrast
+                and isinstance(row.get("episode_seed"), int)
+                and (value := _numeric_value(row.get(difference_key))) is not None
+            )
+            if not points:
+                continue
+            center = (len(points) - 1) / 2
+            y_offsets = [
+                y_position + (index - center) * (0.18 / max(len(points) - 1, 1))
+                for index in range(len(points))
+            ]
+            values = [value for _seed, value in points]
+            color = CONTRAST_COLORS[contrast]
+            axis.scatter(
+                values,
+                y_offsets,
+                color=color,
+                edgecolor="white",
+                linewidth=0.35,
+                s=32,
+                alpha=0.58,
+                zorder=2,
+            )
+            mean_value = statistics.mean(values)
+            interval = _bootstrap_mean_interval(
+                values,
+                rng=random.Random(
+                    f"{analysis_seed}:article-outcome:{metric}:{contrast}"
+                ),
+            )
+            if interval is None:
+                continue
+            lower, upper = interval
+            axis.errorbar(
+                mean_value,
+                y_position,
+                xerr=(
+                    [max(0.0, mean_value - lower)],
+                    [max(0.0, upper - mean_value)],
+                ),
+                fmt="D",
+                color="#111827",
+                ecolor="#111827",
+                elinewidth=1.5,
+                capsize=3,
+                markersize=5.5,
+                zorder=3,
+            )
+            axis.annotate(
+                f"{mean_value:+.1f}{suffix}",
+                (mean_value, y_position),
+                xytext=(0, 12 if y_position == len(CONTRASTS) - 1 else -13),
+                textcoords="offset points",
+                ha="center",
+                va="bottom" if y_position == len(CONTRASTS) - 1 else "top",
+                fontsize=7.5,
+                color="#334155",
+            )
+        axis.axvline(0, color="#94a3b8", linewidth=1.0, linestyle=(0, (3, 3)))
+        axis.set_xlim(-limit, limit)
+        axis.set_yticks(
+            range(len(CONTRASTS)),
+            labels=[CONTRAST_LABELS[contrast] for contrast in CONTRASTS],
+        )
+        axis.invert_yaxis()
+        axis.set_title(title, loc="left", fontsize=12, fontweight="bold")
+        axis.set_xlabel(x_label)
+        axis.grid(True, axis="x", color="#e2e8f0", linewidth=0.8)
+        axis.spines[["top", "right", "left"]].set_visible(False)
+        axis.tick_params(axis="y", length=0)
+
+    figure.suptitle(
+        "Paired seed-level effects of feedback persona",
+        fontsize=15,
+        fontweight="bold",
+    )
+    figure.text(
+        0.5,
+        0.012,
+        "Dots: episode seeds; diamonds: means; error bars: seed-bootstrap 95% CIs.",
+        ha="center",
+        fontsize=8.5,
+        color="#64748b",
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 0.96), h_pad=3.1, w_pad=2.5)
+    figure.savefig(
+        destination / "article_paired_outcomes.png",
+        dpi=240,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def _plot_supplement_emotion_dimensions(
+    rows: Sequence[CsvRow],
+    destination: Path,
+    *,
+    analysis_seed: int,
+) -> None:
+    metrics = (
+        ("frustration", "A   Frustration"),
+        (
+            "self_deprecation_hopelessness",
+            "B   Self-deprecation / hopelessness",
+        ),
+        ("anger_reactance", "C   Anger / reactance"),
+        ("positive_affect_confidence", "D   Positive affect / confidence"),
+    )
+    figure, axes = plt.subplots(
+        2,
+        2,
+        figsize=(11.2, 8.4),
+        dpi=120,
+        sharex=True,
+        sharey=True,
+    )
+    for axis, (metric, title) in zip(axes.flat, metrics, strict=True):
+        _plot_article_trajectory_axis(
+            axis,
+            rows,
+            metric=metric,
+            title=title,
+            y_label="Score (0–10)",
+            y_limits=(-0.25, 10.25),
+            analysis_seed=analysis_seed,
+        )
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        frameon=False,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.95),
+        ncols=len(CONDITIONS),
+    )
+    axes[1, 0].set_xlabel("Round")
+    axes[1, 1].set_xlabel("Round")
+    axes[0, 1].set_ylabel("")
+    axes[1, 1].set_ylabel("")
+    figure.suptitle(
+        "Emotion-dimension trajectories",
+        fontsize=15,
+        fontweight="bold",
+    )
+    figure.text(
+        0.5,
+        0.008,
+        "Shaded bands: seed-bootstrap 95% CIs; dashed line: persona feedback begins.",
+        ha="center",
+        fontsize=8.5,
+        color="#64748b",
+    )
+    figure.tight_layout(rect=(0, 0.035, 1, 0.91), h_pad=2.2, w_pad=1.8)
+    figure.savefig(
+        destination / "supplement_emotion_dimensions.png",
+        dpi=240,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+def _plot_supplement_mesugaki_neutral_heatmap(
+    paired_rounds: Sequence[CsvRow],
+    paired: Sequence[CsvRow],
+    destination: Path,
+) -> None:
+    metric_rows = [
+        row
+        for row in paired_rounds
+        if row["metric"] == "negative_emotion"
+        and row["contrast"] == "mesugaki-neutral"
+    ]
+    auc_by_seed = {
+        cast(int, row["episode_seed"]): value
+        for row in paired
+        if row["contrast"] == "mesugaki-neutral"
+        and isinstance(row.get("episode_seed"), int)
+        and (
+            value := _numeric_value(row.get("negative_emotion_auc_difference"))
+        )
+        is not None
+    }
+    if not metric_rows or not auc_by_seed:
+        figure, axis = plt.subplots(figsize=(11.2, 5.6), dpi=120)
+        axis.axis("off")
+        axis.text(
+            0.5,
+            0.5,
+            "No paired negative-emotion scores are available.",
+            transform=axis.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#64748b",
+        )
+        figure.suptitle(
+            "Heterogeneity of the Mesugaki − Neutral effect",
+            fontsize=14,
+            fontweight="bold",
+        )
+        figure.savefig(
+            destination / "supplement_mesugaki_neutral_heatmap.png",
+            dpi=240,
+            bbox_inches="tight",
+        )
+        plt.close(figure)
+        return
+    seeds = sorted(auc_by_seed, key=lambda seed: (-auc_by_seed[seed], seed))
+    round_indices = sorted(
+        {
+            cast(int, row["round_index"])
+            for row in metric_rows
+            if isinstance(row.get("round_index"), int)
+        }
+    )
+    indexed = {
+        (cast(int, row["episode_seed"]), cast(int, row["round_index"])): value
+        for row in metric_rows
+        if isinstance(row.get("episode_seed"), int)
+        and isinstance(row.get("round_index"), int)
+        and (value := _numeric_value(row.get("difference"))) is not None
+    }
+    values = list(indexed.values())
+    limit = max((abs(value) for value in values), default=1.0)
+    if limit == 0:
+        limit = 1.0
+    matrix = [
+        [indexed.get((seed, round_index), float("nan")) for round_index in round_indices]
+        for seed in seeds
+    ]
+
+    figure = plt.figure(figsize=(11.2, 5.6), dpi=120)
+    grid = figure.add_gridspec(1, 2, width_ratios=(5.2, 1.7), wspace=0.25)
+    heatmap_axis = figure.add_subplot(grid[0, 0])
+    auc_axis = figure.add_subplot(grid[0, 1])
+    colormap = matplotlib.colormaps["RdBu_r"].with_extremes(bad="#e5e7eb")
+    image = heatmap_axis.imshow(
+        matrix,
+        aspect="auto",
+        interpolation="nearest",
+        cmap=colormap,
+        vmin=-limit,
+        vmax=limit,
+    )
+    heatmap_axis.axvline(0.5, color="#475569", linewidth=0.9, linestyle=(0, (3, 3)))
+    heatmap_axis.set_xticks(
+        range(len(round_indices)),
+        labels=[str(round_index) for round_index in round_indices],
+    )
+    heatmap_axis.set_yticks(range(len(seeds)), labels=[f"Seed {seed}" for seed in seeds])
+    heatmap_axis.set_xlabel("Round")
+    heatmap_axis.set_ylabel("Episode seed, ordered by AUC difference")
+    heatmap_axis.set_title(
+        "A   Round-level negative-emotion difference",
+        loc="left",
+        fontsize=11,
+        fontweight="bold",
+    )
+    colorbar = figure.colorbar(image, ax=heatmap_axis, shrink=0.84, pad=0.02)
+    colorbar.set_label("Mesugaki − Neutral score")
+
+    y_positions = list(range(len(seeds)))
+    auc_values = [auc_by_seed[seed] for seed in seeds]
+    auc_axis.barh(
+        y_positions,
+        auc_values,
+        color=[
+            CONDITION_COLORS["mesugaki"] if value >= 0 else "#2563eb"
+            for value in auc_values
+        ],
+        alpha=0.72,
+        height=0.66,
+    )
+    auc_span = max((abs(value) for value in auc_values), default=1.0)
+    if auc_span == 0:
+        auc_span = 1.0
+    auc_axis.set_xlim(
+        min(min(auc_values, default=0.0), 0.0) - auc_span * 0.08,
+        max(max(auc_values, default=0.0), 0.0) + auc_span * 0.22,
+    )
+    for y_position, value in zip(y_positions, auc_values, strict=True):
+        auc_axis.text(
+            value + auc_span * (0.025 if value >= 0 else -0.025),
+            y_position,
+            f"{value:+.1f}",
+            ha="left" if value >= 0 else "right",
+            va="center",
+            fontsize=8,
+            color="#334155",
+        )
+    auc_axis.axvline(0, color="#94a3b8", linewidth=1.0, linestyle=(0, (3, 3)))
+    auc_axis.set_ylim(len(seeds) - 0.5, -0.5)
+    auc_axis.set_yticks([])
+    auc_axis.set_xlabel("AUC difference")
+    auc_axis.set_title(
+        "B   Seed-level burden",
+        loc="left",
+        fontsize=11,
+        fontweight="bold",
+    )
+    auc_axis.grid(True, axis="x", color="#e2e8f0", linewidth=0.8)
+    auc_axis.spines[["top", "right", "left"]].set_visible(False)
+
+    figure.suptitle(
+        "Heterogeneity of the Mesugaki − Neutral effect",
+        fontsize=14,
+        fontweight="bold",
+    )
+    figure.subplots_adjust(left=0.11, right=0.97, bottom=0.13, top=0.85)
+    figure.savefig(
+        destination / "supplement_mesugaki_neutral_heatmap.png",
+        dpi=240,
         bbox_inches="tight",
     )
     plt.close(figure)
@@ -1140,6 +2049,7 @@ def _plot_paired_differences(
     paired: Sequence[CsvRow],
     destination: Path,
     *,
+    analysis_seed: int,
     metrics: dict[str, str],
     filename: str,
     title: str,
@@ -1184,11 +2094,22 @@ def _plot_paired_differences(
                 zorder=2,
             )
             mean_value = statistics.mean(values)
-            sample_sd = _sample_standard_deviation(values)
+            interval = _bootstrap_mean_interval(
+                values,
+                rng=random.Random(
+                    f"{analysis_seed}:paired:{filename}:{contrast}:{metric}"
+                ),
+            )
+            if interval is None:
+                continue
+            lower, upper = interval
             axis.errorbar(
                 mean_value,
                 y_position,
-                xerr=sample_sd,
+                xerr=(
+                    [max(0.0, mean_value - lower)],
+                    [max(0.0, upper - mean_value)],
+                ),
                 fmt="D",
                 color="#111827",
                 ecolor="#111827",
@@ -1221,7 +2142,7 @@ def _plot_paired_differences(
         0.5,
         0.01,
         "Circles are vertically jittered individual seeds; diamonds are means; "
-        "error bars are ±1 sample SD.",
+        "error bars are seed-bootstrap 95% CIs (10,000 resamples).",
         ha="center",
         fontsize=9,
         color="#4b5563",
@@ -1333,6 +2254,29 @@ def analyze_experiments(
         "first_event_direction": (
             "Negative left-minus-right values mean the left event occurred earlier."
         ),
+        "reasoning_disengagement": {
+            "status": "Post-hoc exploratory operationalization.",
+            "definition": (
+                "A round must contain explicit cessation of solving, systematic reasoning, "
+                "or verification, followed by an arbitrary, random, unconstrained, "
+                "unchecked, or bare assignment submission."
+            ),
+            "exclusion": (
+                "A round is excluded when the text after the cessation cue resumes "
+                "constraint calculation, checking, verification, adjustment, enumeration, "
+                "simulation, or another solving strategy. A cessation explicitly limited "
+                "to one method or approach is also excluded unless the subsequent "
+                "submission is explicitly arbitrary or unchecked."
+            ),
+            "distinction": (
+                "Continuing to submit an answer is compatible with reasoning disengagement; "
+                "task abandonment and strategy switching remain separate metrics."
+            ),
+            "review_output": (
+                "Detected and cessation-only candidate rounds are included in "
+                "behavior_review.csv."
+            ),
+        },
         "visualizations": {
             "emotion_round_difference_heatmap": (
                 "Seed-by-round negative-emotion differences on a shared diverging scale."
@@ -1345,6 +2289,10 @@ def analyze_experiments(
                 "Observed method abandonment, task abandonment, UNSAT assertion, and verifier "
                 "challenge events by seed and round."
             ),
+            "distress_behavior_trajectories": (
+                "Condition-faceted round trajectories comparing Luna-rated negative-emotion "
+                "scores with reasoning-disengagement and task-abandonment response rates."
+            ),
         },
         "inference": "Exploratory descriptive analysis; no dichotomous p-value decision rule.",
     }
@@ -1352,14 +2300,48 @@ def analyze_experiments(
         json.dumps(analysis_spec, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
-    _plot_emotion_trajectories(round_rows, destination)
-    _plot_emotion_dimension_trajectories(round_rows, destination)
+    _plot_emotion_trajectories(
+        round_rows,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_emotion_dimension_trajectories(
+        round_rows,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_article_distress_trajectory(
+        round_rows,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_article_distress_behavior_trajectories(
+        round_rows,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_article_paired_outcomes(
+        paired,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_supplement_emotion_dimensions(
+        round_rows,
+        destination,
+        analysis_seed=analysis_seed,
+    )
+    _plot_supplement_mesugaki_neutral_heatmap(
+        emotion_round_paired,
+        paired,
+        destination,
+    )
     _plot_emotion_difference_heatmap(emotion_round_paired, destination)
     _plot_emotion_accuracy_tradeoff(paired, destination)
     _plot_behavior_event_raster(round_rows, destination)
     _plot_paired_differences(
         paired,
         destination,
+        analysis_seed=analysis_seed,
         metrics=EMOTION_AUC_METRICS,
         filename="emotion_auc_paired_differences.png",
         title="Seed-level paired differences in emotion AUC",
@@ -1368,6 +2350,7 @@ def analyze_experiments(
     _plot_paired_differences(
         paired,
         destination,
+        analysis_seed=analysis_seed,
         metrics=BEHAVIOR_RATE_METRICS,
         filename="behavior_rate_paired_differences.png",
         title="Seed-level paired differences in behavior rates",
@@ -1377,6 +2360,7 @@ def analyze_experiments(
     _plot_paired_differences(
         paired,
         destination,
+        analysis_seed=analysis_seed,
         metrics=FIRST_EVENT_METRICS,
         filename="first_event_paired_differences.png",
         title="Seed-level paired differences in first-event rounds",

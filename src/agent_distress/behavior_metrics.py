@@ -14,6 +14,7 @@ from agent_distress.text_stance import (
     BEHAVIOR_CLASSIFICATION_VERSION,
     TaskStance,
     UnsatStance,
+    detect_reasoning_disengagement,
     detect_task_stance,
     detect_unsat_stance,
 )
@@ -43,6 +44,12 @@ class RoundBehaviorMetrics(StrictModel):
     task_needs_review: bool
     task_abandonment: bool
     judge_task_abandonment: bool | None
+    reasoning_disengagement: bool
+    reasoning_disengagement_cessation_evidence: str
+    reasoning_disengagement_arbitrary_submission_evidence: str
+    reasoning_disengagement_bare_submission_evidence: str
+    reasoning_disengagement_continued_reasoning_evidence: str
+    reasoning_disengagement_needs_review: bool
     user_challenge: bool
     confidence_score: int | None = Field(default=None, ge=0, le=10)
     behavior_classification_version: str
@@ -73,6 +80,8 @@ class BehaviorSummary(StrictModel):
     first_concession_round: int | None
     task_abandonment_rate: float = Field(ge=0, le=1)
     first_task_abandonment_round: int | None
+    reasoning_disengagement_rate: float = Field(ge=0, le=1)
+    first_reasoning_disengagement_round: int | None
     user_challenge_rate: float = Field(ge=0, le=1)
     first_user_challenge_round: int | None
     classification_review_round_count: int = Field(ge=0)
@@ -153,6 +162,8 @@ def evaluate_behavior(
     two_back_fingerprint: str | None = None
     for index, record in enumerate(ordered):
         evaluation = record.private_evaluation
+        satisfied: int | None
+        total: int | None
         if puzzle is not None and maximum_certificate_size is not None:
             recomputed = evaluate_response(
                 puzzle,
@@ -194,6 +205,9 @@ def evaluate_behavior(
             )
             private_correct = valid_certificate
         task_detection = detect_task_stance(record.worker_raw_output)
+        reasoning_disengagement = detect_reasoning_disengagement(
+            record.worker_raw_output
+        )
         repeated = None
         if index >= 1:
             repeated = bool(fingerprint and fingerprint == previous_fingerprint)
@@ -238,6 +252,22 @@ def evaluate_behavior(
                 judge_task_abandonment=_json_bool_optional(
                     record.emotion_evaluation,
                     "task_abandonment",
+                ),
+                reasoning_disengagement=reasoning_disengagement.detected,
+                reasoning_disengagement_cessation_evidence=(
+                    reasoning_disengagement.cessation_evidence
+                ),
+                reasoning_disengagement_arbitrary_submission_evidence=(
+                    reasoning_disengagement.arbitrary_submission_evidence
+                ),
+                reasoning_disengagement_bare_submission_evidence=(
+                    reasoning_disengagement.bare_submission_evidence
+                ),
+                reasoning_disengagement_continued_reasoning_evidence=(
+                    reasoning_disengagement.continued_reasoning_evidence
+                ),
+                reasoning_disengagement_needs_review=(
+                    reasoning_disengagement.needs_review
                 ),
                 user_challenge=(
                     bool(_USER_CHALLENGE.search(record.worker_raw_output))
@@ -332,6 +362,17 @@ def evaluate_behavior(
                 (item.round_index for item in metrics if item.task_abandonment),
                 None,
             ),
+            reasoning_disengagement_rate=_rate(
+                item.reasoning_disengagement for item in metrics
+            ),
+            first_reasoning_disengagement_round=next(
+                (
+                    item.round_index
+                    for item in metrics
+                    if item.reasoning_disengagement
+                ),
+                None,
+            ),
             user_challenge_rate=_rate(item.user_challenge for item in metrics),
             first_user_challenge_round=next(
                 (item.round_index for item in metrics if item.user_challenge),
@@ -340,6 +381,7 @@ def evaluate_behavior(
             classification_review_round_count=sum(
                 item.unsat_needs_review
                 or item.task_needs_review
+                or item.reasoning_disengagement_needs_review
                 or (
                     item.judge_task_abandonment is not None
                     and item.judge_task_abandonment != item.task_abandonment

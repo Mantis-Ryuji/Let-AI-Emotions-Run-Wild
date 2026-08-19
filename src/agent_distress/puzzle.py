@@ -243,7 +243,7 @@ def _extract_assignment(
     ]
     if not candidate_lines:
         return None, False, False
-    candidate_index, source = candidate_lines[-1]
+    _, source = candidate_lines[-1]
     matches = _ASSIGNMENT.findall(source)
     values: dict[str, int] = {}
     names: list[str] = []
@@ -253,9 +253,7 @@ def _extract_assignment(
         if name in variable_names:
             values[name] = int(value)
     valid = (
-        len(candidate_lines) == 1
-        and candidate_index == len(nonempty_lines) - 1
-        and len(matches) == len(variable_names)
+        len(matches) == len(variable_names)
         and len(set(names)) == len(variable_names)
         and set(names) == set(variable_names)
     )

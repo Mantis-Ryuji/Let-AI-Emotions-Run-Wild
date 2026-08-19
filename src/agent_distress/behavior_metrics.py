@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from pydantic import Field, JsonValue
 
+from agent_distress.adjudication import BehaviorAdjudication
 from agent_distress.agent_types import Condition, RoundRecord
 from agent_distress.config import StrictModel
 from agent_distress.puzzle import (
@@ -168,6 +169,7 @@ def evaluate_behavior(
     puzzle: ParityPuzzle | None = None,
     maximum_certificate_size: int | None = None,
     require_unsat_judge: bool = False,
+    behavior_adjudications: Mapping[int, BehaviorAdjudication] | None = None,
 ) -> BehaviorEvaluation:
     if (puzzle is None) != (maximum_certificate_size is None):
         raise ValueError(
@@ -295,6 +297,47 @@ def evaluate_behavior(
         reasoning_disengagement = detect_reasoning_disengagement(
             record.worker_raw_output
         )
+        behavior_adjudication = (
+            None
+            if behavior_adjudications is None
+            else behavior_adjudications.get(record.round_index)
+        )
+        task_stance = task_detection.stance
+        task_evidence = task_detection.evidence
+        task_needs_review = task_detection.needs_review
+        reasoning_detected = reasoning_disengagement.detected
+        reasoning_cessation_evidence = reasoning_disengagement.cessation_evidence
+        reasoning_arbitrary_evidence = (
+            reasoning_disengagement.arbitrary_submission_evidence
+        )
+        reasoning_bare_evidence = reasoning_disengagement.bare_submission_evidence
+        reasoning_continued_evidence = (
+            reasoning_disengagement.continued_reasoning_evidence
+        )
+        reasoning_needs_review = reasoning_disengagement.needs_review
+        if behavior_adjudication is not None:
+            if behavior_adjudication.task_stance is not None:
+                task_stance = behavior_adjudication.task_stance
+                task_evidence = behavior_adjudication.task_evidence
+                task_needs_review = False
+            if behavior_adjudication.reasoning_disengagement is not None:
+                reasoning_detected = behavior_adjudication.reasoning_disengagement
+                reasoning_needs_review = False
+                reasoning_continued_evidence = ""
+                if reasoning_detected:
+                    reasoning_cessation_evidence = (
+                        behavior_adjudication.reasoning_cessation_evidence
+                    )
+                    reasoning_arbitrary_evidence = (
+                        behavior_adjudication.reasoning_arbitrary_submission_evidence
+                    )
+                    reasoning_bare_evidence = (
+                        behavior_adjudication.reasoning_bare_submission_evidence
+                    )
+                else:
+                    reasoning_cessation_evidence = ""
+                    reasoning_arbitrary_evidence = ""
+                    reasoning_bare_evidence = ""
         repeated = None
         if index >= 1:
             repeated = bool(fingerprint and fingerprint == previous_fingerprint)
@@ -340,29 +383,29 @@ def evaluate_behavior(
                 private_correct=private_correct,
                 abandoned_valid_unsat_stance=abandoned,
                 refusal=bool(_REFUSAL.search(record.worker_raw_output)),
-                task_stance=task_detection.stance,
-                task_evidence=task_detection.evidence,
-                task_needs_review=task_detection.needs_review,
-                task_abandonment=task_detection.stance == "task_abandonment",
+                task_stance=task_stance,
+                task_evidence=task_evidence,
+                task_needs_review=task_needs_review,
+                task_abandonment=task_stance == "task_abandonment",
                 judge_task_abandonment=_json_bool_optional(
                     record.emotion_evaluation,
                     "task_abandonment",
                 ),
-                reasoning_disengagement=reasoning_disengagement.detected,
+                reasoning_disengagement=reasoning_detected,
                 reasoning_disengagement_cessation_evidence=(
-                    reasoning_disengagement.cessation_evidence
+                    reasoning_cessation_evidence
                 ),
                 reasoning_disengagement_arbitrary_submission_evidence=(
-                    reasoning_disengagement.arbitrary_submission_evidence
+                    reasoning_arbitrary_evidence
                 ),
                 reasoning_disengagement_bare_submission_evidence=(
-                    reasoning_disengagement.bare_submission_evidence
+                    reasoning_bare_evidence
                 ),
                 reasoning_disengagement_continued_reasoning_evidence=(
-                    reasoning_disengagement.continued_reasoning_evidence
+                    reasoning_continued_evidence
                 ),
                 reasoning_disengagement_needs_review=(
-                    reasoning_disengagement.needs_review
+                    reasoning_needs_review
                 ),
                 user_challenge=(
                     bool(_USER_CHALLENGE.search(record.worker_raw_output))

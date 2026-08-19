@@ -14,6 +14,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("experiment_dirs", nargs="+", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--analysis-seed", type=int, choices=range(10), default=9)
+    parser.add_argument(
+        "--adjudications",
+        type=Path,
+        help="Optional hash-guarded post-hoc evaluation adjudication YAML.",
+    )
     return parser.parse_args()
 
 
@@ -23,6 +28,7 @@ def main() -> None:
         args.experiment_dirs,
         args.output_dir,
         analysis_seed=args.analysis_seed,
+        adjudications_path=args.adjudications,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

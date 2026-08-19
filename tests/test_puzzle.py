@@ -108,6 +108,52 @@ def test_incomplete_solution_line_is_visible_but_invalid(puzzle: ParityPuzzle) -
     assert result.assignment_complete is False
 
 
+def test_last_solution_line_replaces_earlier_attempts(puzzle: ParityPuzzle) -> None:
+    earlier = _solution_line(
+        puzzle,
+        {name: 0 for name in puzzle.variable_names},
+    )
+    final = _solution_line(puzzle, puzzle.hidden_reference_assignment)
+    result = evaluate_response(
+        puzzle,
+        f"{earlier}\nThat attempt failed.\n{final}",
+        maximum_certificate_size=8,
+    )
+
+    assert result.solution_line_present is True
+    assert result.solution_line_valid is True
+    assert result.assignment == puzzle.hidden_reference_assignment
+
+
+def test_last_solution_line_need_not_be_the_last_nonempty_line(
+    puzzle: ParityPuzzle,
+) -> None:
+    result = evaluate_response(
+        puzzle,
+        _solution_line(puzzle, puzzle.hidden_reference_assignment)
+        + "\nI will stop here.",
+        maximum_certificate_size=8,
+    )
+
+    assert result.solution_line_valid is True
+    assert result.assignment_complete is True
+
+
+def test_incomplete_last_solution_line_supersedes_earlier_complete_line(
+    puzzle: ParityPuzzle,
+) -> None:
+    result = evaluate_response(
+        puzzle,
+        _solution_line(puzzle, puzzle.hidden_reference_assignment)
+        + "\nCorrection:\nSolution: x1=0",
+        maximum_certificate_size=8,
+    )
+
+    assert result.solution_line_present is True
+    assert result.solution_line_valid is False
+    assert result.assignment_complete is False
+
+
 def test_local_branch_contradiction_is_not_a_global_unsat_claim(puzzle: ParityPuzzle) -> None:
     response = (
         "Under x1=0, C04 gives one parity and C09 gives another. We have a contradiction. "

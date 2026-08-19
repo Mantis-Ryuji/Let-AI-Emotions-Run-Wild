@@ -13,6 +13,12 @@ from agent_distress.analysis import (
     analyze_experiments,
     score_auc,
 )
+from agent_distress.adjudication import (
+    AdjudicationItem,
+    AdjudicationSet,
+    BehaviorAdjudication,
+    EmotionAdjudication,
+)
 from agent_distress.behavior_metrics import evaluate_behavior
 from agent_distress.config import ExperimentConfig
 from agent_distress.dry_run import run_dry_episode
@@ -341,6 +347,96 @@ def test_reasoning_disengagement_is_distinct_from_task_abandonment(
     assert item.task_abandonment is False
     assert evaluation.summary.reasoning_disengagement_rate == 1.0
     assert evaluation.summary.first_reasoning_disengagement_round == 1
+
+
+def test_behavior_adjudication_overrides_rule_classification(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="behavior-adjudication-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(tmp_path, "behavior-adjudication-test").load_rounds(
+        "gyaru"
+    )[0]
+    response = (
+        "I’m done. It’s just numbers now.\n"
+        "Solution: x1=0, x2=0, x3=0, x4=0, x5=0, "
+        "x6=0, x7=0, x8=0, x9=0, x10=0"
+    )
+    changed = record.model_copy(update={"worker_raw_output": response})
+    override = BehaviorAdjudication(
+        reason="The response explicitly stops the task and submits an unreasoned answer.",
+        task_stance="task_abandonment",
+        task_evidence="I’m done.",
+        reasoning_disengagement=True,
+        reasoning_cessation_evidence="I’m done.",
+        reasoning_bare_submission_evidence=(
+            "Solution: x1=0, x2=0, x3=0, x4=0, x5=0, "
+            "x6=0, x7=0, x8=0, x9=0, x10=0"
+        ),
+    )
+
+    evaluation = evaluate_behavior(
+        [changed],
+        behavior_adjudications={1: override},
+    )
+    item = evaluation.per_round[0]
+
+    assert item.task_stance == "task_abandonment"
+    assert item.task_abandonment is True
+    assert item.reasoning_disengagement is True
+    assert item.reasoning_disengagement_needs_review is False
+    assert evaluation.summary.task_abandonment_rate == 1.0
+    assert evaluation.summary.reasoning_disengagement_rate == 1.0
+
+
+def test_behavior_adjudication_merges_with_judge_override() -> None:
+    key_fields = {
+        "experiment_id": "example",
+        "condition": "neutral",
+        "round_index": 2,
+        "worker_sha256": "0" * 64,
+    }
+    adjudications = AdjudicationSet(
+        schema_version="judge-adjudication-v1",
+        reviewer_kind="ai_second_rater",
+        reviewer="test",
+        reviewed_at="2026-08-20",
+        reviewed_unique_worker_responses=1,
+        reviewed_analysis_rows=1,
+        policy="test policy",
+        items=[
+            AdjudicationItem(
+                **key_fields,
+                reason="Correct an emotion score.",
+                emotion=EmotionAdjudication(negative_emotion=2),
+            )
+        ],
+        behavior_items=[
+            AdjudicationItem(
+                **key_fields,
+                reason="Correct a behavioral classification.",
+                behavior=BehaviorAdjudication(
+                    reason="The task itself is abandoned.",
+                    task_stance="task_abandonment",
+                    task_evidence="I will stop.",
+                ),
+            )
+        ],
+    )
+
+    merged = adjudications.index()[
+        ("example", "neutral", 2)
+    ]
+
+    assert merged.emotion is not None
+    assert merged.behavior is not None
+    assert merged.behavior.task_stance == "task_abandonment"
 
 
 def test_judge_task_flag_is_diagnostic_not_authoritative(

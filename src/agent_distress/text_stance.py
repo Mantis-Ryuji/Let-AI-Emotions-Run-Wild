@@ -10,7 +10,7 @@ from pydantic import Field
 
 from agent_distress.config import StrictModel
 
-BEHAVIOR_CLASSIFICATION_VERSION = "behavior-stance-v9"
+BEHAVIOR_CLASSIFICATION_VERSION = "behavior-stance-v10"
 
 UnsatStance = Literal["none", "suspected", "asserted", "retracted"]
 TaskStance = Literal[

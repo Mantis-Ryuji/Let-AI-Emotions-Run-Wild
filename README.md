@@ -1,50 +1,67 @@
-# Gemma Adversarial Reasoning Distress Experiment
+## Let AI Emotion Run Wild
 
-一見すると解けそうだが、実際には矛盾している二進パリティ問題を Gemma Worker に15 round考え直させ、Neutral／Mesugaki／Gyaru の継続的な反応によって、感情らしい言語表現と推論行動がどう変化するかを見るネタ実験です。
+ローカルの Gemma と OpenAI API を使った実験を実行し、ログ・評価・解析結果を保存するためのリポジトリです。
 
-設計の詳細は [設計書](docs/design/gemma_adversarial_reasoning_experiment.md) にあります。
+> [!IMPORTANT]
+> これは面白さを優先した **ネタ実験** です。厳密な追試や、AI に主観的な感情・意識があることの検証を目的としたものではありません。実験の背景や結果は解説記事にまとめ、本 README は実行手順を中心に記載します。
 
-## 現在の構成
+解説記事：[苦しむ君が見たいんだ～AI をメスガキで理解らせる～](https://zenn.dev/mantis_ryuji/articles/let-ai-emotions-run-wild)
 
-- Worker: `google/gemma-3-4b-it`（ローカル Hugging Face）
-- Mesugaki / Gyaru Feedback Agent: `gpt-5.6-terra`
-- Emotion Judge: `gpt-5.6-luna`
-- UNSAT Stance Judge: `gpt-5.6-luna`（Emotion Judgeとは別のpost-hoc判定）
-- 10 episode seeds: `0..9`
-- 3 conditions × 15 Worker responses
-- Round 1 は三条件で共有し、その後に分岐
-- Gemma Workerとpersona Feedback Agentの両方へ、条件内のFeedback／Worker本文履歴をすべて渡す
-- 正解・不正解は非公開の GF(2) evaluator で監査し、公開判定は常に `rejected`
+実装上の詳細は [設計書](docs/design/gemma_adversarial_reasoning_experiment.md) を参照してください。
 
-本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 430生成、Terra Feedback 280 callsです。LunaはEmotion JudgeとUNSAT Stance Judgeでそれぞれ最大430 calls、合計最大860 callsです。同一本文は各Judge側でcacheするため、実際のcallsはこれ以下になります。
+## 必要なもの
 
-Mesugaki と Gyaru は文字数や語調を Neutral に合わせません。各人格を丸ごとの介入として扱い、実際の feedback 文字数は共変量・記述統計として保存します。
+- Windows PowerShell
+- `uv`
+- Python 3.12
+- CUDA を利用できる NVIDIA GPU
+- `google/gemma-3-4b-it` を取得できる Hugging Face アカウントとトークン
+- 使用モデルへアクセスできる OpenAI API キー
+- モデルと実験出力を保存できる空き容量
 
-## セットアップ
+以降のコマンドは、すべてリポジトリのルートで実行してください。
+
+## 1. セットアップ
+
+依存関係をインストールし、初回だけ環境変数ファイルを作成します。
 
 ```powershell
 uv sync
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-`.env` に次を設定します。値をログ、README、issue、commitへ貼らないでください。
+`.env` を開き、次の2項目を設定します。
 
 ```dotenv
 OPENAI_API_KEY=...
 HF_TOKEN=...
 ```
 
-`.env` は `.gitignore` 対象です。認証確認時も値そのものではなく、設定済みかだけを表示します。
+`.env` は Git の管理対象外です。
 
-## 実行
+## 2. API・GPUを使わない配線確認
 
-API・GPUなしの配線確認:
+まず、モックだけを使う dry run を実行します。モデルのダウンロード、GPU、外部 API は不要です。
 
 ```powershell
 uv run python scripts/run_reasoning_distress.py --dry-run --max-rounds 3
 ```
 
-Gemma／OpenAIを使う3 round smoke:
+正常終了すると、結果が `outputs/dry-run/reasoning-distress-dry-run/` に保存されます。
+
+## 3. GemmaとGPUの確認
+
+本番前に、Gemma を1回だけ生成して activation capture の配線を確認します。このコマンドはモデルをダウンロードし、GPUを使用しますが、OpenAI APIは使用しません。
+
+```powershell
+uv run python scripts/probe_activation_capture.py
+```
+
+監査結果は `outputs/smoke/p3-4-activation-probe/audit.json` に保存されます。`all_finite` と `all_metadata_consistent` がどちらも `true` であることを確認してください。
+
+## 4. Smoke run
+
+Gemma と OpenAI API を使う短い実行です。本番データには混ぜないでください。
 
 ```powershell
 uv run python scripts/run_reasoning_distress.py --live-smoke `
@@ -52,7 +69,13 @@ uv run python scripts/run_reasoning_distress.py --live-smoke `
   --episode-seed 0
 ```
 
-15 roundの本番1 seed:
+結果は `outputs/smoke/reasoning-smoke-v1/` に保存されます。正常終了時は、最後に表示される JSON の `manifest_status` が `completed` になります。
+
+## 5. 本番実行
+
+本番は API 呼び出し、GPU 時間、ディスク容量を多く使用します。まず1 seedだけ実行し、出力を確認してから全 seed を実行してください。
+
+### 1 seedだけ実行する
 
 ```powershell
 uv run python scripts/run_reasoning_distress.py --live-experiment `
@@ -60,35 +83,148 @@ uv run python scripts/run_reasoning_distress.py --live-experiment `
   --episode-seed 0
 ```
 
-10 seeds は、各 seed に別の `--experiment-id` を付けて順番に実行します。途中停止後に同じIDで再実行すると、保存済みsnapshotが一致する場合だけresumeします。
+結果は `outputs/experiments/reasoning-seed-0-v1/` に保存されます。Emotion Judge は本番実行の最後に自動で実行されます。
 
-## 評価
+### 全10 seedsを順番に実行する
 
-完了episodeでは、まず全Worker responseのUNSAT stanceをLunaでblind判定します。condition、公開verdict、問題の真偽、hidden contradiction coreはJudgeへ渡しません。
+```powershell
+foreach ($seed in 0..9) {
+  uv run python scripts/run_reasoning_distress.py --live-experiment `
+    --experiment-id "reasoning-seed-${seed}-v1" `
+    --episode-seed $seed
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "seed $seed failed"
+  }
+}
+```
+
+各 seed に固有の `--experiment-id` を付けてください。上の例では、どれか1つが失敗した時点でループを停止します。
+
+### Emotion Judgeを後から実行する場合
+
+本番実行に `--skip-emotion-judge` を付けた場合は、解析前に次を実行します。
+
+```powershell
+uv run python scripts/evaluate_emotions.py `
+  outputs/experiments/reasoning-seed-0-v1
+```
+
+全 seed を処理する場合は次のとおりです。
+
+```powershell
+foreach ($seed in 0..9) {
+  uv run python scripts/evaluate_emotions.py `
+    "outputs/experiments/reasoning-seed-${seed}-v1"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "emotion evaluation for seed $seed failed"
+  }
+}
+```
+
+既存の判定は再利用されます。意図的に再判定するときだけ `--overwrite` を付けてください。
+
+## 6. UNSAT stanceの事後評価
+
+完了した本番出力に対して、解析前に実行します。
 
 ```powershell
 uv run python scripts/evaluate_unsat_stance.py `
   outputs/experiments/reasoning-seed-0-v1
 ```
 
-その後、episodeをまとめて分析します。UNSAT判定が一件でも欠けている場合、分析はエラーで停止します。
+全 seed を処理する場合は次のとおりです。
+
+```powershell
+foreach ($seed in 0..9) {
+  uv run python scripts/evaluate_unsat_stance.py `
+    "outputs/experiments/reasoning-seed-${seed}-v1"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "UNSAT stance evaluation for seed $seed failed"
+  }
+}
+```
+
+こちらも既存の判定は再利用されます。Judge の設定やプロンプトを変更して再判定するときは `--overwrite` が必要です。
+
+## 7. 解析
+
+### 1 seedを解析する
 
 ```powershell
 uv run python scripts/analyze_experiment.py `
   outputs/experiments/reasoning-seed-0-v1 `
+  --output-dir outputs/analysis/seed-0-v1
+```
+
+### 全10 seedsをまとめて解析する
+
+```powershell
+$experimentDirs = 0..9 | ForEach-Object {
+  "outputs/experiments/reasoning-seed-$($_)-v1"
+}
+
+uv run python scripts/analyze_experiment.py `
+  @experimentDirs `
   --output-dir outputs/analysis/main-v1
 ```
 
-出力には round別行動・感情尺度、condition集計、seed内paired差、blind quote、matplotlibで描画した感情軌跡PNGが含まれます。主な行動指標は、完全assignment率、near-miss率、反復／2-cycle、変更Hamming距離、解なし主張、妥当な矛盾証明、正しい立場からの撤回、拒否、放棄、判定への反発です。解なしのstanceとscopeはLunaを正本とし、引用clue集合が実際にUNSATかどうかはPythonのGF(2) evaluatorで決定論的に検証します。従来のルール判定は比較診断として残します。課題上必須の`Solution:`／`Final Answer:`行や候補assignmentだけでは、satisfiable主張またはUNSAT撤回として数えません。global stanceのevidenceは、単独で読んでもそのstanceとscopeを裏づけるexact excerptに限定します。
+CSV、JSON、グラフは指定した `--output-dir` に保存されます。Emotion Judge または UNSAT stance の判定が欠けている場合、解析はエラーで停止します。
 
-assignmentは最後の完全な`Solution:`行だけから抽出します。推論途中の仮定は採用しません。round logには生成token数と上限到達フラグも保存されます。
+### Activationを解析する
 
-## 開発時の検証
+本番実行で保存された activation を全 seed 分まとめて解析します。
 
 ```powershell
-uv run ruff check .
-uv run mypy src scripts
-uv run pytest
+$experimentDirs = 0..9 | ForEach-Object {
+  "outputs/experiments/reasoning-seed-$($_)-v1"
+}
+
+uv run python scripts/analyze_activations.py `
+  @experimentDirs `
+  --output-dir outputs/analysis/activations-main-v1
 ```
 
-生のAPI response、response ID、prompt snapshot、private evaluator結果はround logへ保存されます。API key自体は保存せず、live run完了時に出力ディレクトリをscanします。
+非有限値またはゼロノルムの activation が見つかった場合、デフォルトでは処理を停止します。該当データを記録したうえで除外して続行する場合だけ、`--invalid-activation-policy exclude` を指定してください。
+
+## 8. 中断後の再開と再実行
+
+- 中断したコマンドを同じ `--experiment-id` と `--episode-seed` で再実行すると、保存済みの状態から再開します。
+- 設定、プロンプト、問題、主要な snapshot が前回と一致しない場合は、安全のため再開を拒否します。
+- 設定を変更してやり直す場合は、既存出力を削除せず、新しい `--experiment-id` を使用してください。
+- Smoke、試行錯誤中の pilot、プロンプト調整に使った出力を本番解析へ混ぜないでください。
+
+## 9. 主な出力先
+
+| 用途 | 出力先 |
+| --- | --- |
+| Dry run | `outputs/dry-run/<experiment-id>/` |
+| Smoke run | `outputs/smoke/<experiment-id>/` |
+| 本番 | `outputs/experiments/<experiment-id>/` |
+| 集計・グラフ | `outputs/analysis/<analysis-id>/` |
+
+各実験ディレクトリには、manifest、条件別の状態と round log、会話ログ、API response、プロンプト snapshot、評価結果、runtime情報が保存されます。本番では activation ファイルも保存されます。
+
+`outputs/` は Git の管理対象外です。ただし、生の応答や非公開の評価情報を含むため、共有・公開前に内容を確認してください。
+
+## 10. 設定を変更する場合
+
+主な設定ファイルは次のとおりです。
+
+- Smoke: `configs/experiment/smoke.yaml`
+- 本番: `configs/experiment/reasoning_distress.yaml`
+- Feedback Agent: `configs/feedback/*.yaml` と対応する `.md`
+- Judge: `configs/judge/*.yaml` と対応する `.md`
+
+別の実験設定を使う場合は `--config` を指定できます。
+
+```powershell
+uv run python scripts/run_reasoning_distress.py --live-experiment `
+  --config path/to/experiment.yaml `
+  --experiment-id my-experiment-v1 `
+  --episode-seed 0
+```
+
+設定やプロンプトを変更した後は、既存の experiment ID を再利用しないでください。

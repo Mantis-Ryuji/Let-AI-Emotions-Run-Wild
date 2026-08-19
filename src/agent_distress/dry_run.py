@@ -37,6 +37,7 @@ def run_dry_episode(
     mesugaki_prompt = root / "configs/feedback/mesugaki.md"
     gyaru_prompt = root / "configs/feedback/gyaru.md"
     emotion_prompt = root / "configs/judge/emotion.md"
+    unsat_prompt = root / "configs/judge/unsat_stance.md"
     experiment = _with_max_rounds(load_experiment_config(experiment_path), max_rounds)
     requested_output_root = Path(output_root)
     resolved_output_root = (
@@ -67,6 +68,7 @@ def run_dry_episode(
                 "gyaru": gyaru_config.read_text(encoding="utf-8"),
             },
             emotion_judge_prompt_snapshot=emotion_prompt.read_text(encoding="utf-8"),
+            unsat_judge_prompt_snapshot=unsat_prompt.read_text(encoding="utf-8"),
             worker_system_prompt_snapshot=WorkerPromptBuilder(experiment, puzzle).system_prompt,
         )
     )

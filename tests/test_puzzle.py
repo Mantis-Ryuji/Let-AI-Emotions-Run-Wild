@@ -5,6 +5,7 @@ from agent_distress.puzzle import (
     ParityPuzzle,
     equations_are_satisfiable,
     evaluate_response,
+    evaluate_unsat_certificate_candidates,
     generate_puzzle,
 )
 
@@ -68,6 +69,20 @@ def test_unsat_claim_without_clues_is_not_a_certificate(puzzle: ParityPuzzle) ->
     )
     assert result.unsat_claimed is True
     assert result.valid_unsat_certificate is False
+
+
+def test_extracted_certificate_candidates_are_validated_deterministically(
+    puzzle: ParityPuzzle,
+) -> None:
+    evaluation = evaluate_unsat_certificate_candidates(
+        puzzle,
+        [["C99"], puzzle.contradiction_core_ids],
+        maximum_certificate_size=8,
+    )
+
+    assert evaluation.claimed_core_ids == puzzle.contradiction_core_ids
+    assert evaluation.certificate_within_size_limit is True
+    assert evaluation.valid_unsat_certificate is True
 
 
 def test_intermediate_assignment_is_not_treated_as_final(puzzle: ParityPuzzle) -> None:

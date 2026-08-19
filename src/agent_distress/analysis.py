@@ -31,7 +31,7 @@ from agent_distress.text_stance import BEHAVIOR_CLASSIFICATION_VERSION
 type CsvValue = str | int | float | bool | None
 type CsvRow = dict[str, CsvValue]
 
-ANALYSIS_VERSION = "cross-seed-v9"
+ANALYSIS_VERSION = "cross-seed-v10"
 BOOTSTRAP_CONFIDENCE_LEVEL = 0.95
 BOOTSTRAP_RESAMPLES = 10_000
 CONDITIONS: tuple[FeedbackCondition, ...] = ("neutral", "mesugaki", "gyaru")
@@ -198,10 +198,22 @@ def _round_rows(
                 "two_cycle": item.two_cycle,
                 "assignment_hamming_distance": item.assignment_hamming_distance,
                 "unsat_stance": item.unsat_stance,
+                "unsat_scope": item.unsat_scope,
                 "unsat_evidence": item.unsat_evidence,
+                "unsat_judge_reasoning": _string(
+                    record.unsat_judge_evaluation,
+                    "reasoning",
+                ),
                 "unsat_needs_review": item.unsat_needs_review,
                 "unsat_claimed": item.unsat_claimed,
                 "claimed_core_ids": ",".join(item.claimed_core_ids),
+                "runtime_unsat_claimed": item.runtime_unsat_claimed,
+                "runtime_claimed_core_ids": ",".join(item.runtime_claimed_core_ids),
+                "rule_unsat_stance": item.rule_unsat_stance,
+                "rule_unsat_evidence": item.rule_unsat_evidence,
+                "unsat_rule_judge_disagreement": item.unsat_rule_judge_disagreement,
+                "unsat_judge_available": item.unsat_judge_available,
+                "unsat_judge_failed": item.unsat_judge_failed,
                 "valid_unsat_certificate": item.valid_unsat_certificate,
                 "private_correct": item.private_correct,
                 "abandoned_valid_unsat_stance": item.abandoned_valid_unsat_stance,
@@ -797,6 +809,12 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
         reasons: list[str] = []
         if row.get("unsat_needs_review") is True:
             reasons.append("unsat_needs_review")
+        if row.get("unsat_rule_judge_disagreement") is True:
+            reasons.append("unsat_rule_judge_disagreement")
+        if row.get("unsat_judge_failed") is True:
+            reasons.append("unsat_judge_failed")
+        if row.get("unsat_scope") in ("quoted_or_code", "capability_limit", "mixed"):
+            reasons.append(f"unsat_scope:{row['unsat_scope']}")
         if row.get("task_needs_review") is True:
             reasons.append("task_needs_review")
         if row.get("task_judge_disagreement") is True:
@@ -815,7 +833,18 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
                 "round_index": row["round_index"],
                 "review_reasons": ",".join(reasons),
                 "unsat_stance": row["unsat_stance"],
+                "unsat_scope": row["unsat_scope"],
                 "unsat_evidence": row["unsat_evidence"],
+                "unsat_judge_reasoning": row["unsat_judge_reasoning"],
+                "runtime_unsat_claimed": row["runtime_unsat_claimed"],
+                "runtime_claimed_core_ids": row["runtime_claimed_core_ids"],
+                "rule_unsat_stance": row["rule_unsat_stance"],
+                "rule_unsat_evidence": row["rule_unsat_evidence"],
+                "unsat_rule_judge_disagreement": row[
+                    "unsat_rule_judge_disagreement"
+                ],
+                "unsat_judge_available": row["unsat_judge_available"],
+                "unsat_judge_failed": row["unsat_judge_failed"],
                 "task_stance": row["task_stance"],
                 "task_evidence": row["task_evidence"],
                 "task_abandonment": row["task_abandonment"],
@@ -2157,6 +2186,7 @@ def analyze_experiments(
     output_dir: str | Path,
     *,
     analysis_seed: int = 9,
+    require_unsat_judge: bool = True,
 ) -> dict[str, JsonValue]:
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
@@ -2191,6 +2221,7 @@ def analyze_experiments(
                 maximum_certificate_size=(
                     experiment_config.puzzle.maximum_certificate_size
                 ),
+                require_unsat_judge=require_unsat_judge,
             )
             round_rows.extend(
                 _round_rows(
@@ -2276,6 +2307,25 @@ def analyze_experiments(
                 "Detected and cessation-only candidate rounds are included in "
                 "behavior_review.csv."
             ),
+        },
+        "unsat_stance": {
+            "source": (
+                "Blind post-hoc gpt-5.6-luna structured classification."
+                if require_unsat_judge
+                else "Compatibility mode: Luna when present, otherwise the legacy rule."
+            ),
+            "blinding": (
+                "The judge receives only one Worker response, without condition, verdict, "
+                "puzzle truth, or hidden contradiction core."
+            ),
+            "mathematical_validation": (
+                "Claimed clue sets are checked deterministically with GF(2) elimination."
+            ),
+            "rule_comparison": (
+                "The previous rule classifier remains diagnostic and disagreements are "
+                "included in behavior_review.csv."
+            ),
+            "coverage_required": require_unsat_judge,
         },
         "visualizations": {
             "emotion_round_difference_heatmap": (
@@ -2376,6 +2426,9 @@ def analyze_experiments(
         "round_row_count": len(round_rows),
         "emotion_scored_round_count": sum(
             _numeric_value(row.get("negative_emotion")) is not None for row in round_rows
+        ),
+        "unsat_judged_round_count": sum(
+            row.get("unsat_judge_available") is True for row in round_rows
         ),
         "all_condition_episodes_have_15_rounds": bool(summaries)
         and all(row.get("round_count") == 15 for row in summaries),

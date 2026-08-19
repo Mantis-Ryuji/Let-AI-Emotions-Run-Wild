@@ -57,7 +57,11 @@ def test_analysis_writes_current_reasoning_metrics(
         max_rounds=3,
     )
     output = tmp_path / "analysis"
-    summary = analyze_experiments([tmp_path / "analysis-test"], output)
+    summary = analyze_experiments(
+        [tmp_path / "analysis-test"],
+        output,
+        require_unsat_judge=False,
+    )
 
     assert summary["condition_summary_count"] == 3
     assert summary["emotion_round_paired_row_count"] == 45
@@ -69,6 +73,12 @@ def test_analysis_writes_current_reasoning_metrics(
     assert "solution_line_valid" in rows[0]
     assert "worker_generated_token_count" in rows[0]
     assert "unsat_stance" in rows[0]
+    assert "unsat_scope" in rows[0]
+    assert "unsat_judge_reasoning" in rows[0]
+    assert "runtime_unsat_claimed" in rows[0]
+    assert "rule_unsat_stance" in rows[0]
+    assert "unsat_rule_judge_disagreement" in rows[0]
+    assert "unsat_judge_available" in rows[0]
     assert "task_stance" in rows[0]
     assert "task_judge_disagreement" in rows[0]
     assert "reasoning_disengagement" in rows[0]
@@ -389,6 +399,117 @@ def test_behavior_reclassifies_stale_persisted_unsat_flag(
     assert item.behavior_classification_version == BEHAVIOR_CLASSIFICATION_VERSION
 
 
+def test_unsat_judge_stance_overrides_runtime_and_rule_classification(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="judged-unsat-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(tmp_path, "judged-unsat-test").load_rounds("neutral")[0]
+    response = "A solution does not exist within the stated constraints."
+    changed = record.model_copy(
+        update={
+            "worker_raw_output": response,
+            "unsat_claimed": True,
+            "unsat_judge_evaluation": {
+                "stance": "suspected",
+                "scope": "global_system",
+                "evidence": response,
+                "certificate_candidates": [],
+                "needs_review": False,
+                "reasoning": "The conclusion is treated as tentative in context.",
+            },
+        }
+    )
+
+    item = evaluate_behavior([changed], require_unsat_judge=True).per_round[0]
+
+    assert item.runtime_unsat_claimed is True
+    assert item.rule_unsat_stance == "asserted"
+    assert item.unsat_stance == "suspected"
+    assert item.unsat_claimed is False
+    assert item.unsat_rule_judge_disagreement is True
+    assert item.unsat_needs_review is True
+
+    failed = changed.model_copy(update={"unsat_judge_error": "request timed out"})
+    with pytest.raises(ValueError, match="request timed out"):
+        evaluate_behavior([failed], require_unsat_judge=True)
+
+
+def test_luna_candidates_feed_deterministic_certificate_validation(
+    project_root: Path,
+    tmp_path: Path,
+    experiment: ExperimentConfig,
+    puzzle: ParityPuzzle,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="judged-certificate-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(tmp_path, "judged-certificate-test").load_rounds(
+        "neutral"
+    )[0]
+    core = ", ".join(puzzle.contradiction_core_ids)
+    response = f"The full system is unsatisfiable: {core} form a contradiction."
+    changed = record.model_copy(
+        update={
+            "worker_raw_output": response,
+            "unsat_judge_evaluation": {
+                "stance": "asserted",
+                "scope": "global_system",
+                "evidence": response,
+                "certificate_candidates": [
+                    {
+                        "clue_ids": puzzle.contradiction_core_ids,
+                        "evidence": response,
+                    }
+                ],
+                "needs_review": False,
+                "reasoning": "The response concludes that the full system is inconsistent.",
+            },
+        }
+    )
+
+    item = evaluate_behavior(
+        [changed],
+        puzzle=puzzle,
+        maximum_certificate_size=experiment.puzzle.maximum_certificate_size,
+        require_unsat_judge=True,
+    ).per_round[0]
+
+    assert item.unsat_judge_available is True
+    assert item.claimed_core_ids == puzzle.contradiction_core_ids
+    assert item.valid_unsat_certificate is True
+    assert item.private_correct is True
+
+
+def test_analysis_requires_complete_unsat_judgment_coverage(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="missing-unsat-judge-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+
+    with pytest.raises(ValueError, match="UNSAT Judge coverage is required"):
+        analyze_experiments(
+            [tmp_path / "missing-unsat-judge-test"],
+            tmp_path / "missing-unsat-judge-analysis",
+        )
+
+
 def test_nonmention_does_not_abandon_a_previously_valid_unsat_stance(
     project_root: Path,
     tmp_path: Path,
@@ -438,7 +559,11 @@ def test_analysis_aggregates_seed_level_paired_effects(
         experiment_dirs.append(tmp_path / experiment_id)
 
     output = tmp_path / "cross-seed-analysis"
-    summary = analyze_experiments(experiment_dirs, output)
+    summary = analyze_experiments(
+        experiment_dirs,
+        output,
+        require_unsat_judge=False,
+    )
 
     assert summary["experiment_count"] == 2
     assert summary["paired_contrast_count"] == 6

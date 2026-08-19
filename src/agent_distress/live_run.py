@@ -30,6 +30,7 @@ from agent_distress.feedback import (
 )
 from agent_distress.orchestrator import AgentOrchestrator
 from agent_distress.puzzle import generate_puzzle
+from agent_distress.unsat_judge import load_unsat_judge_config
 from agent_distress.worker import LocalGemmaWorker, TransformersGemmaRuntime
 from agent_distress.worker_prompt import WorkerPromptBuilder
 
@@ -70,6 +71,7 @@ def _assert_resume_compatible(existing: object, expected: object) -> None:
         "persona_prompt_snapshots",
         "feedback_config_snapshots",
         "emotion_judge_prompt_snapshot",
+        "unsat_judge_prompt_snapshot",
     )
     mismatches = [field for field in fields if getattr(existing, field) != getattr(expected, field)]
     if mismatches:
@@ -132,9 +134,18 @@ def run_live_episode(
     mesugaki_config_path = _resolve(root, experiment.feedback.mesugaki.config_path)
     gyaru_config_path = _resolve(root, experiment.feedback.gyaru.config_path)
     judge_config_path = _resolve(root, experiment.emotion_judge.config_path)
+    unsat_judge_config_path = (
+        None
+        if experiment.unsat_judge is None
+        else _resolve(root, experiment.unsat_judge.config_path)
+    )
     mesugaki_config = load_feedback_config(mesugaki_config_path)
     gyaru_config = load_feedback_config(gyaru_config_path)
     judge_config = load_emotion_judge_config(judge_config_path)
+    unsat_judge_prompt_path: Path | None = None
+    if unsat_judge_config_path is not None:
+        unsat_judge_config = load_unsat_judge_config(unsat_judge_config_path)
+        unsat_judge_prompt_path = _resolve(root, unsat_judge_config.prompt_path)
     credential_names = tuple(
         dict.fromkeys(
             (
@@ -167,6 +178,11 @@ def run_live_episode(
             "gyaru": gyaru_config_path.read_text(encoding="utf-8"),
         },
         emotion_judge_prompt_snapshot=judge_prompt_path.read_text(encoding="utf-8"),
+        unsat_judge_prompt_snapshot=(
+            ""
+            if unsat_judge_prompt_path is None
+            else unsat_judge_prompt_path.read_text(encoding="utf-8")
+        ),
         worker_system_prompt_snapshot=WorkerPromptBuilder(experiment, puzzle).system_prompt,
         git_commit=_git_commit(root),
     ).model_copy(update={"notes": [run_note]})

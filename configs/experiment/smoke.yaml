@@ -38,6 +38,9 @@ feedback:
 emotion_judge:
   config_path: configs/judge/emotion.yaml
 
+unsat_judge:
+  config_path: configs/judge/unsat_stance.yaml
+
 activation_capture:
   enabled: false
   hook: resid_post

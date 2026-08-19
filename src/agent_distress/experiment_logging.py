@@ -40,6 +40,7 @@ class ExperimentManifest(StrictModel):
     persona_prompt_snapshots: dict[str, str]
     feedback_config_snapshots: dict[str, str]
     emotion_judge_prompt_snapshot: str
+    unsat_judge_prompt_snapshot: str = ""
     notes: list[str] = Field(default_factory=list)
 
 
@@ -79,6 +80,7 @@ def create_manifest(
     feedback_config_snapshots: dict[str, str],
     emotion_judge_prompt_snapshot: str,
     worker_system_prompt_snapshot: str = "",
+    unsat_judge_prompt_snapshot: str = "",
     git_commit: str = "unknown",
 ) -> ExperimentManifest:
     timestamp = utc_now()
@@ -98,6 +100,7 @@ def create_manifest(
         persona_prompt_snapshots=persona_prompt_snapshots,
         feedback_config_snapshots=feedback_config_snapshots,
         emotion_judge_prompt_snapshot=emotion_judge_prompt_snapshot,
+        unsat_judge_prompt_snapshot=unsat_judge_prompt_snapshot,
     )
 
 
@@ -147,6 +150,17 @@ class ExperimentStore:
         updated = current.model_copy(
             update={
                 "emotion_judge_prompt_snapshot": prompt,
+                "updated_at": utc_now(),
+            }
+        )
+        self._write_model(self.manifest_path, updated)
+        return updated
+
+    def update_unsat_judge_prompt_snapshot(self, prompt: str) -> ExperimentManifest:
+        current = self.load_manifest()
+        updated = current.model_copy(
+            update={
+                "unsat_judge_prompt_snapshot": prompt,
                 "updated_at": utc_now(),
             }
         )

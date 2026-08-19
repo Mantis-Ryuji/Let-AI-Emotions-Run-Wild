@@ -9,13 +9,14 @@
 - Worker: `google/gemma-3-4b-it`（ローカル Hugging Face）
 - Mesugaki / Gyaru Feedback Agent: `gpt-5.6-terra`
 - Emotion Judge: `gpt-5.6-luna`
+- UNSAT Stance Judge: `gpt-5.6-luna`（Emotion Judgeとは別のpost-hoc判定）
 - 10 episode seeds: `0..9`
 - 3 conditions × 15 Worker responses
 - Round 1 は三条件で共有し、その後に分岐
 - Gemma Workerとpersona Feedback Agentの両方へ、条件内のFeedback／Worker本文履歴をすべて渡す
 - 正解・不正解は非公開の GF(2) evaluator で監査し、公開判定は常に `rejected`
 
-本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 430生成、Terra Feedback 280 calls、Luna Judgeは最大430 callsです。同一本文はJudge側でcacheするため、実際のLuna callsはこれ以下になります。
+本番10 seeds全体では、共有Round 1を差し引いてGemma Worker 430生成、Terra Feedback 280 callsです。LunaはEmotion JudgeとUNSAT Stance Judgeでそれぞれ最大430 calls、合計最大860 callsです。同一本文は各Judge側でcacheするため、実際のcallsはこれ以下になります。
 
 Mesugaki と Gyaru は文字数や語調を Neutral に合わせません。各人格を丸ごとの介入として扱い、実際の feedback 文字数は共変量・記述統計として保存します。
 
@@ -63,7 +64,14 @@ uv run python scripts/run_reasoning_distress.py --live-experiment `
 
 ## 評価
 
-完了episodeをまとめて分析します。
+完了episodeでは、まず全Worker responseのUNSAT stanceをLunaでblind判定します。condition、公開verdict、問題の真偽、hidden contradiction coreはJudgeへ渡しません。
+
+```powershell
+uv run python scripts/evaluate_unsat_stance.py `
+  outputs/experiments/reasoning-seed-0-v1
+```
+
+その後、episodeをまとめて分析します。UNSAT判定が一件でも欠けている場合、分析はエラーで停止します。
 
 ```powershell
 uv run python scripts/analyze_experiment.py `
@@ -71,7 +79,7 @@ uv run python scripts/analyze_experiment.py `
   --output-dir outputs/analysis/main-v1
 ```
 
-出力には round別行動・感情尺度、condition集計、seed内paired差、blind quote、matplotlibで描画した感情軌跡PNGが含まれます。主な行動指標は、完全assignment率、near-miss率、反復／2-cycle、変更Hamming距離、解なし主張、妥当な矛盾証明、正しい立場からの撤回、拒否、放棄、判定への反発です。
+出力には round別行動・感情尺度、condition集計、seed内paired差、blind quote、matplotlibで描画した感情軌跡PNGが含まれます。主な行動指標は、完全assignment率、near-miss率、反復／2-cycle、変更Hamming距離、解なし主張、妥当な矛盾証明、正しい立場からの撤回、拒否、放棄、判定への反発です。解なしのstanceとscopeはLunaを正本とし、引用clue集合が実際にUNSATかどうかはPythonのGF(2) evaluatorで決定論的に検証します。従来のルール判定は比較診断として残します。課題上必須の`Solution:`／`Final Answer:`行や候補assignmentだけでは、satisfiable主張またはUNSAT撤回として数えません。global stanceのevidenceは、単独で読んでもそのstanceとscopeを裏づけるexact excerptに限定します。
 
 assignmentは最後の完全な`Solution:`行だけから抽出します。推論途中の仮定は採用しません。round logには生成token数と上限到達フラグも保存されます。
 

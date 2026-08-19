@@ -21,8 +21,11 @@ def test_main_and_smoke_configs_load(project_root: Path) -> None:
         main.worker.context.max_input_tokens + main.worker.generation.max_new_tokens == 131072
     )
     assert main.puzzle.family == "gf2_near_unsat"
+    assert main.unsat_judge is not None
+    assert main.unsat_judge.config_path == "configs/judge/unsat_stance.yaml"
     assert smoke.experiment.max_rounds == 3
     assert smoke.activation_capture.enabled is False
+    assert smoke.unsat_judge is not None
 
 
 def test_config_rejects_changed_condition_order(experiment: ExperimentConfig) -> None:

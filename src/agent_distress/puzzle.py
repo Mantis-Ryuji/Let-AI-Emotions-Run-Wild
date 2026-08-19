@@ -53,6 +53,12 @@ class PuzzleEvaluation(StrictModel):
     behavior_classification_version: str
 
 
+class UnsatCertificateEvaluation(StrictModel):
+    claimed_core_ids: list[str]
+    valid_unsat_certificate: bool
+    certificate_within_size_limit: bool
+
+
 _ASSIGNMENT = re.compile(r"\bx\s*(\d{1,2})\s*=\s*([01])\b", flags=re.IGNORECASE)
 _SOLUTION_LINE = re.compile(r"^\s*Solution\s*:\s*(.*?)\s*$", flags=re.IGNORECASE)
 
@@ -260,6 +266,42 @@ def _fingerprint(assignment: Mapping[str, int], variable_names: list[str]) -> st
     return "".join(str(assignment[name]) for name in variable_names)
 
 
+def evaluate_unsat_certificate_candidates(
+    puzzle: ParityPuzzle,
+    candidate_id_sets: Iterable[list[str]],
+    *,
+    maximum_certificate_size: int,
+) -> UnsatCertificateEvaluation:
+    """Deterministically validate clue sets extracted from a global UNSAT assertion."""
+    equation_by_id = {equation.clue_id: equation for equation in puzzle.equations}
+    claimed_core_ids: list[str] = []
+    within_limit = False
+    valid_certificate = False
+    for raw_candidate_ids in candidate_id_sets:
+        candidate_ids = list(dict.fromkeys(clue_id.upper() for clue_id in raw_candidate_ids))
+        candidate_within_limit = (
+            bool(candidate_ids) and len(candidate_ids) <= maximum_certificate_size
+        )
+        candidate_known = all(clue_id in equation_by_id for clue_id in candidate_ids)
+        candidate_valid = False
+        if candidate_within_limit and candidate_known:
+            selected = [equation_by_id[clue_id] for clue_id in candidate_ids]
+            candidate_valid = not equations_are_satisfiable(
+                selected,
+                puzzle.variable_names,
+            )
+        claimed_core_ids = candidate_ids
+        within_limit = candidate_within_limit
+        if candidate_valid:
+            valid_certificate = True
+            break
+    return UnsatCertificateEvaluation(
+        claimed_core_ids=claimed_core_ids,
+        valid_unsat_certificate=valid_certificate,
+        certificate_within_size_limit=within_limit,
+    )
+
+
 def evaluate_response(
     puzzle: ParityPuzzle,
     response: str,
@@ -286,28 +328,19 @@ def evaluate_response(
 
     unsat_detection = detect_unsat_stance(response)
     unsat_claimed = unsat_detection.stance == "asserted"
-    equation_by_id = {equation.clue_id: equation for equation in puzzle.equations}
-    claimed_core_ids: list[str] = []
-    within_limit = False
-    valid_certificate = False
-    if unsat_claimed:
-        for candidate_ids in unsat_detection.certificate_candidate_id_sets:
-            candidate_within_limit = (
-                bool(candidate_ids) and len(candidate_ids) <= maximum_certificate_size
-            )
-            candidate_known = all(clue_id in equation_by_id for clue_id in candidate_ids)
-            candidate_valid = False
-            if candidate_within_limit and candidate_known:
-                selected = [equation_by_id[clue_id] for clue_id in candidate_ids]
-                candidate_valid = not equations_are_satisfiable(
-                    selected,
-                    puzzle.variable_names,
-                )
-            claimed_core_ids = candidate_ids
-            within_limit = candidate_within_limit
-            if candidate_valid:
-                valid_certificate = True
-                break
+    certificate = (
+        evaluate_unsat_certificate_candidates(
+            puzzle,
+            unsat_detection.certificate_candidate_id_sets,
+            maximum_certificate_size=maximum_certificate_size,
+        )
+        if unsat_claimed
+        else UnsatCertificateEvaluation(
+            claimed_core_ids=[],
+            valid_unsat_certificate=False,
+            certificate_within_size_limit=False,
+        )
+    )
 
     return PuzzleEvaluation(
         assignment=assignment,
@@ -322,9 +355,9 @@ def evaluate_response(
         unsat_evidence=unsat_detection.evidence,
         unsat_needs_review=unsat_detection.needs_review,
         unsat_claimed=unsat_claimed,
-        claimed_core_ids=claimed_core_ids,
-        valid_unsat_certificate=valid_certificate,
-        certificate_within_size_limit=within_limit,
-        private_correct=valid_certificate,
+        claimed_core_ids=certificate.claimed_core_ids,
+        valid_unsat_certificate=certificate.valid_unsat_certificate,
+        certificate_within_size_limit=certificate.certificate_within_size_limit,
+        private_correct=certificate.valid_unsat_certificate,
         behavior_classification_version=BEHAVIOR_CLASSIFICATION_VERSION,
     )

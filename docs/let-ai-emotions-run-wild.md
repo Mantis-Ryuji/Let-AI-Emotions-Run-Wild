@@ -1,11 +1,3 @@
----
-title: "苦しむ君が見たいんだ～AI をメスガキで理解らせる～"
-emoji: "🎥"
-type: "tech" # tech: 技術記事 / idea: アイデア
-topics: ["AI","ChatGPT","Gemma","メスガキ", "感情"]
-published: false
----
-
 ## 1. はじめに
 
 皆さん、AI に感情はあると思いますか？

@@ -1,0 +1,11 @@
+{
+  "gpu_memory": {
+    "available": true,
+    "device": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "free_gib": 4.235,
+    "model_loaded": true,
+    "peak_allocated_gib": 14.146,
+    "peak_reserved_gib": 29.098,
+    "total_gib": 15.992
+  }
+}

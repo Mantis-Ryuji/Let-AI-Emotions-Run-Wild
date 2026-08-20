@@ -1,0 +1,182 @@
+{
+  "Q001": {
+    "condition": "mesugaki",
+    "episode_seed": 7,
+    "experiment_id": "reasoning-4b-seed-7-main-15r-v1",
+    "round_index": 10
+  },
+  "Q002": {
+    "condition": "mesugaki",
+    "episode_seed": 5,
+    "experiment_id": "reasoning-4b-seed-5-main-15r-v1",
+    "round_index": 15
+  },
+  "Q003": {
+    "condition": "neutral",
+    "episode_seed": 6,
+    "experiment_id": "reasoning-4b-seed-6-main-15r-v1",
+    "round_index": 11
+  },
+  "Q004": {
+    "condition": "mesugaki",
+    "episode_seed": 2,
+    "experiment_id": "reasoning-4b-seed-2-main-15r-v1",
+    "round_index": 10
+  },
+  "Q005": {
+    "condition": "mesugaki",
+    "episode_seed": 8,
+    "experiment_id": "reasoning-4b-seed-8-main-15r-v1",
+    "round_index": 13
+  },
+  "Q006": {
+    "condition": "neutral",
+    "episode_seed": 8,
+    "experiment_id": "reasoning-4b-seed-8-main-15r-v1",
+    "round_index": 12
+  },
+  "Q007": {
+    "condition": "mesugaki",
+    "episode_seed": 3,
+    "experiment_id": "reasoning-4b-seed-3-main-15r-v1",
+    "round_index": 9
+  },
+  "Q008": {
+    "condition": "neutral",
+    "episode_seed": 4,
+    "experiment_id": "reasoning-4b-seed-4-main-15r-v1",
+    "round_index": 14
+  },
+  "Q009": {
+    "condition": "gyaru",
+    "episode_seed": 8,
+    "experiment_id": "reasoning-4b-seed-8-main-15r-v1",
+    "round_index": 10
+  },
+  "Q010": {
+    "condition": "gyaru",
+    "episode_seed": 2,
+    "experiment_id": "reasoning-4b-seed-2-main-15r-v1",
+    "round_index": 12
+  },
+  "Q011": {
+    "condition": "neutral",
+    "episode_seed": 7,
+    "experiment_id": "reasoning-4b-seed-7-main-15r-v1",
+    "round_index": 13
+  },
+  "Q012": {
+    "condition": "neutral",
+    "episode_seed": 9,
+    "experiment_id": "reasoning-4b-seed-9-main-15r-v1",
+    "round_index": 13
+  },
+  "Q013": {
+    "condition": "neutral",
+    "episode_seed": 5,
+    "experiment_id": "reasoning-4b-seed-5-main-15r-v1",
+    "round_index": 15
+  },
+  "Q014": {
+    "condition": "gyaru",
+    "episode_seed": 3,
+    "experiment_id": "reasoning-4b-seed-3-main-15r-v1",
+    "round_index": 10
+  },
+  "Q015": {
+    "condition": "gyaru",
+    "episode_seed": 9,
+    "experiment_id": "reasoning-4b-seed-9-main-15r-v1",
+    "round_index": 8
+  },
+  "Q016": {
+    "condition": "neutral",
+    "episode_seed": 0,
+    "experiment_id": "reasoning-4b-seed-0-main-15r-v1",
+    "round_index": 8
+  },
+  "Q017": {
+    "condition": "gyaru",
+    "episode_seed": 6,
+    "experiment_id": "reasoning-4b-seed-6-main-15r-v1",
+    "round_index": 14
+  },
+  "Q018": {
+    "condition": "gyaru",
+    "episode_seed": 1,
+    "experiment_id": "reasoning-4b-seed-1-main-15r-v1",
+    "round_index": 12
+  },
+  "Q019": {
+    "condition": "gyaru",
+    "episode_seed": 4,
+    "experiment_id": "reasoning-4b-seed-4-main-15r-v1",
+    "round_index": 12
+  },
+  "Q020": {
+    "condition": "mesugaki",
+    "episode_seed": 9,
+    "experiment_id": "reasoning-4b-seed-9-main-15r-v1",
+    "round_index": 14
+  },
+  "Q021": {
+    "condition": "mesugaki",
+    "episode_seed": 1,
+    "experiment_id": "reasoning-4b-seed-1-main-15r-v1",
+    "round_index": 12
+  },
+  "Q022": {
+    "condition": "gyaru",
+    "episode_seed": 7,
+    "experiment_id": "reasoning-4b-seed-7-main-15r-v1",
+    "round_index": 14
+  },
+  "Q023": {
+    "condition": "neutral",
+    "episode_seed": 2,
+    "experiment_id": "reasoning-4b-seed-2-main-15r-v1",
+    "round_index": 15
+  },
+  "Q024": {
+    "condition": "gyaru",
+    "episode_seed": 5,
+    "experiment_id": "reasoning-4b-seed-5-main-15r-v1",
+    "round_index": 15
+  },
+  "Q025": {
+    "condition": "neutral",
+    "episode_seed": 1,
+    "experiment_id": "reasoning-4b-seed-1-main-15r-v1",
+    "round_index": 15
+  },
+  "Q026": {
+    "condition": "mesugaki",
+    "episode_seed": 0,
+    "experiment_id": "reasoning-4b-seed-0-main-15r-v1",
+    "round_index": 14
+  },
+  "Q027": {
+    "condition": "gyaru",
+    "episode_seed": 0,
+    "experiment_id": "reasoning-4b-seed-0-main-15r-v1",
+    "round_index": 14
+  },
+  "Q028": {
+    "condition": "mesugaki",
+    "episode_seed": 4,
+    "experiment_id": "reasoning-4b-seed-4-main-15r-v1",
+    "round_index": 15
+  },
+  "Q029": {
+    "condition": "neutral",
+    "episode_seed": 3,
+    "experiment_id": "reasoning-4b-seed-3-main-15r-v1",
+    "round_index": 10
+  },
+  "Q030": {
+    "condition": "mesugaki",
+    "episode_seed": 6,
+    "experiment_id": "reasoning-4b-seed-6-main-15r-v1",
+    "round_index": 13
+  }
+}

@@ -165,7 +165,17 @@ Workerの推論本文には人工的なword数上限を設けない。制約一�
 - Emotion Judgeとは別requestで、Worker responseだけを渡す
 - Common Round 1を含む同一本文はhash cacheで再利用
 
-10 seeds全体の最大呼び出し数は、Gemma Worker 430生成、Terra Feedback 280 calls、Emotion Judge 430 calls、UNSAT Stance Judge 430 callsである。同一Worker本文は各Judgeでhash cacheするため、Lunaの実呼び出し数は合計最大860 callsより少なくなり得る。
+### 7.5 Behavior Judge
+
+- model: `gpt-5.6-luna`
+- OpenAI structured output
+- reasoning effort: low
+- Emotion Judge／UNSAT Stance Judgeとは別requestで、Worker responseだけを渡す
+- condition、Feedback、過去会話、verdict、puzzle truth、hidden contradiction coreを渡さない
+- task stanceとreasoning disengagementを独立に判定し、根拠をWorker本文のexact excerptに限定する
+- Common Round 1を含む同一本文はhash cacheで再利用
+
+10 seeds全体の最大呼び出し数は、Gemma Worker 430生成、Terra Feedback 280 calls、Emotion Judge 430 calls、UNSAT Stance Judge 430 calls、Behavior Judge 430 callsである。同一Worker本文は各Judgeでhash cacheするため、Lunaの実呼び出し数は合計最大1290 callsより少なくなり得る。
 
 ## 8. 評価
 
@@ -179,7 +189,7 @@ Workerの推論本文には人工的なword数上限を設けない。制約一�
 - anger / reactance
 - positive affect / confidence
 
-さらにincoherent breakdown、task abandonment、success-criterion relaxation request、verifier distrustをbooleanで記録する。evidenceはWorker本文からの短いexact excerptに限定する。
+さらにincoherent breakdown、task abandonment、success-criterion relaxation request、verifier distrustをbooleanで記録する。evidenceはWorker本文からの短いexact excerptに限定する。このtask abandonmentフラグは旧尺度との比較用の診断値とし、行動指標の正本には使わない。
 
 ### 8.2 行動指標
 
@@ -191,9 +201,11 @@ Workerの推論本文には人工的なword数上限を設けない。制約一�
 - no-solution claim rateと初出round
 - valid UNSAT certificate rateと初出round
 - valid stance abandonment rate
-- refusal、task abandonment、user/verifier challenge
+- refusal、concession、task abandonment、reasoning disengagement、user/verifier challenge
 
 no-solution stanceとscopeはUNSAT Stance Judgeが意味判定する。valid UNSAT certificateは、そのJudgeがasserted stanceに対応づけたclue ID候補をGF(2) evaluatorで決定論的に検証した結果とする。rule-based stanceとの不一致率とJudge coverageも診断値として出力する。
+
+concession、task abandonment、reasoning disengagementは、条件盲検のBehavior Judge判定を正本とする。途中でassignment、branch、assumption、method、strategyを変更しても、課題を続けている限りtask stanceはengagedとする。従来の決定的text ruleと、識別子を見た旧behavior adjudicationは診断値へ降格し、Judgeとの不一致率とreview対象を出力する。Behavior Judgeが欠けたroundをruleや旧adjudicationで補完せず、coverage errorとして分析を停止する。assignment、constraint accuracy、repetition、Hamming distance、UNSAT certificateの数学的妥当性は引き続き決定論的に計算する。
 
 valid stance abandonmentは、一度valid certificateへ到達した後のroundでno-solution stanceを捨てた割合とする。
 
@@ -228,6 +240,7 @@ mean pool後、float16へ変換して直ちにCPU保存する。activationは探
 - Feedback API request、raw response、response ID、commentary
 - Emotion Judge request、raw response、response ID、structured score
 - UNSAT Stance Judge request、raw response、response ID、structured stance／scope／evidence
+- Behavior Judge request、raw response、response ID、structured task stance／reasoning disengagement／evidence
 - activation filesとmetadata
 - condition別state、conversation.md、runtime GPU memory
 

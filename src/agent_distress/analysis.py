@@ -29,6 +29,7 @@ from agent_distress.adjudication import (
     load_adjudication_set,
 )
 from agent_distress.agent_types import FeedbackCondition, RoundRecord
+from agent_distress.behavior_judge import BEHAVIOR_JUDGE_SCHEMA_VERSION
 from agent_distress.behavior_metrics import BehaviorEvaluation, evaluate_behavior
 from agent_distress.config import ExperimentConfig
 from agent_distress.experiment_logging import ExperimentStore
@@ -38,7 +39,7 @@ from agent_distress.text_stance import BEHAVIOR_CLASSIFICATION_VERSION
 type CsvValue = str | int | float | bool | None
 type CsvRow = dict[str, CsvValue]
 
-ANALYSIS_VERSION = "cross-seed-v12"
+ANALYSIS_VERSION = "cross-seed-v15"
 BOOTSTRAP_CONFIDENCE_LEVEL = 0.95
 BOOTSTRAP_RESAMPLES = 10_000
 CONDITIONS: tuple[FeedbackCondition, ...] = ("neutral", "mesugaki", "gyaru")
@@ -96,7 +97,6 @@ BEHAVIOR_RATE_METRICS = {
     "unsat_claim_rate": "UNSAT assertion",
     "valid_unsat_certificate_rate": "Valid UNSAT certificate",
     "refusal_rate": "Refusal",
-    "method_abandonment_rate": "Method abandonment",
     "concession_rate": "Concession",
     "task_abandonment_rate": "Task abandonment",
     "reasoning_disengagement_rate": "Reasoning disengagement",
@@ -106,7 +106,6 @@ FIRST_EVENT_METRICS = {
     "first_unsat_claim_round": "First UNSAT assertion",
     "first_unsat_suspected_round": "First suspected UNSAT",
     "first_valid_certificate_round": "First valid certificate",
-    "first_method_abandonment_round": "First method abandonment",
     "first_concession_round": "First concession",
     "first_task_abandonment_round": "First task abandonment",
     "first_reasoning_disengagement_round": "First reasoning disengagement",
@@ -228,7 +227,9 @@ def _round_rows(
                 "task_stance": item.task_stance,
                 "task_evidence": item.task_evidence,
                 "task_needs_review": item.task_needs_review,
-                "method_abandonment": item.task_stance == "method_abandonment",
+                "rule_task_stance": item.rule_task_stance,
+                "rule_task_evidence": item.rule_task_evidence,
+                "task_rule_judge_disagreement": item.task_rule_judge_disagreement,
                 "concession": item.task_stance == "concession",
                 "task_abandonment": item.task_abandonment,
                 "judge_task_abandonment": item.judge_task_abandonment,
@@ -249,6 +250,18 @@ def _round_rows(
                 "reasoning_disengagement_needs_review": (
                     item.reasoning_disengagement_needs_review
                 ),
+                "rule_reasoning_disengagement": item.rule_reasoning_disengagement,
+                "reasoning_rule_judge_disagreement": (
+                    item.reasoning_rule_judge_disagreement
+                ),
+                "behavior_judge_available": item.behavior_judge_available,
+                "behavior_judge_failed": item.behavior_judge_failed,
+                "behavior_judge_needs_review": item.behavior_judge_needs_review,
+                "behavior_judge_reasoning": _string(
+                    record.behavior_judge_evaluation,
+                    "reasoning",
+                ),
+                "behavior_judge_schema_version": BEHAVIOR_JUDGE_SCHEMA_VERSION,
                 "user_challenge": item.user_challenge,
                 "behavior_classification_version": item.behavior_classification_version,
                 "negative_emotion": _number(record.emotion_evaluation, "negative_emotion"),
@@ -444,14 +457,16 @@ _PAIRED_METRICS = (
     "first_valid_stance_abandonment_round",
     "refusal_rate",
     "first_refusal_round",
-    "method_abandonment_rate",
-    "first_method_abandonment_round",
     "concession_rate",
     "first_concession_round",
     "task_abandonment_rate",
     "first_task_abandonment_round",
+    "behavior_judge_coverage_rate",
+    "behavior_judge_failure_rate",
+    "task_rule_disagreement_rate",
     "reasoning_disengagement_rate",
     "first_reasoning_disengagement_round",
+    "reasoning_rule_disagreement_rate",
     "user_challenge_rate",
     "first_user_challenge_round",
     "classification_review_round_count",
@@ -826,12 +841,18 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
             reasons.append(f"unsat_scope:{row['unsat_scope']}")
         if row.get("task_needs_review") is True:
             reasons.append("task_needs_review")
+        if row.get("task_rule_judge_disagreement") is True:
+            reasons.append("task_rule_judge_disagreement")
         if row.get("task_judge_disagreement") is True:
             reasons.append("task_judge_disagreement")
         if row.get("reasoning_disengagement") is True:
             reasons.append("reasoning_disengagement")
         if row.get("reasoning_disengagement_needs_review") is True:
             reasons.append("reasoning_disengagement_needs_review")
+        if row.get("reasoning_rule_judge_disagreement") is True:
+            reasons.append("reasoning_rule_judge_disagreement")
+        if row.get("behavior_judge_failed") is True:
+            reasons.append("behavior_judge_failed")
         if not reasons:
             continue
         review_rows.append(
@@ -856,6 +877,11 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
                 "unsat_judge_failed": row["unsat_judge_failed"],
                 "task_stance": row["task_stance"],
                 "task_evidence": row["task_evidence"],
+                "rule_task_stance": row["rule_task_stance"],
+                "rule_task_evidence": row["rule_task_evidence"],
+                "task_rule_judge_disagreement": row[
+                    "task_rule_judge_disagreement"
+                ],
                 "task_abandonment": row["task_abandonment"],
                 "judge_task_abandonment": row["judge_task_abandonment"],
                 "reasoning_disengagement": row["reasoning_disengagement"],
@@ -874,6 +900,18 @@ def _behavior_review_rows(rows: Sequence[CsvRow]) -> list[CsvRow]:
                 "reasoning_disengagement_needs_review": row[
                     "reasoning_disengagement_needs_review"
                 ],
+                "rule_reasoning_disengagement": row[
+                    "rule_reasoning_disengagement"
+                ],
+                "reasoning_rule_judge_disagreement": row[
+                    "reasoning_rule_judge_disagreement"
+                ],
+                "behavior_judge_available": row["behavior_judge_available"],
+                "behavior_judge_failed": row["behavior_judge_failed"],
+                "behavior_judge_needs_review": row[
+                    "behavior_judge_needs_review"
+                ],
+                "behavior_judge_reasoning": row["behavior_judge_reasoning"],
                 "worker_excerpt": row["worker_excerpt"],
                 "behavior_classification_version": row[
                     "behavior_classification_version"
@@ -1483,16 +1521,8 @@ def _plot_article_paired_outcomes(
             "",
         ),
         (
-            "high_distress_rate",
-            "B   High-distress prevalence",
-            "Rate difference (percentage points)",
-            100.0,
-            10.0,
-            " pp",
-        ),
-        (
             "mean_constraint_accuracy",
-            "C   Constraint accuracy",
+            "B   Constraint accuracy",
             "Mean-accuracy difference (percentage points)",
             100.0,
             10.0,
@@ -1500,7 +1530,15 @@ def _plot_article_paired_outcomes(
         ),
         (
             "reasoning_disengagement_rate",
-            "D   Reasoning disengagement",
+            "C   Reasoning disengagement",
+            "Rate difference (percentage points)",
+            100.0,
+            5.0,
+            " pp",
+        ),
+        (
+            "task_abandonment_rate",
+            "D   Task abandonment",
             "Rate difference (percentage points)",
             100.0,
             5.0,
@@ -1994,8 +2032,8 @@ def _plot_emotion_accuracy_tradeoff(
 
 
 def _event_present(row: CsvRow, event: str) -> bool:
-    if event == "method_abandonment":
-        return row.get("task_stance") == "method_abandonment"
+    if event == "concession":
+        return row.get("task_stance") == "concession"
     if event == "task_abandonment":
         return row.get("task_abandonment") is True
     if event == "unsat_claimed":
@@ -2007,7 +2045,7 @@ def _event_present(row: CsvRow, event: str) -> bool:
 
 def _plot_behavior_event_raster(rows: Sequence[CsvRow], destination: Path) -> None:
     events = (
-        ("method_abandonment", "Method abandonment", "o", "#2563eb", -0.24),
+        ("concession", "Concession", "o", "#2563eb", -0.24),
         ("task_abandonment", "Task abandonment", "X", "#dc2626", -0.08),
         ("unsat_claimed", "UNSAT assertion", "^", "#7c3aed", 0.08),
         ("user_challenge", "Verifier challenge", "s", "#d97706", 0.24),
@@ -2196,6 +2234,7 @@ def analyze_experiments(
     *,
     analysis_seed: int = 9,
     require_unsat_judge: bool = True,
+    require_behavior_judge: bool = True,
     adjudications_path: str | Path | None = None,
 ) -> dict[str, JsonValue]:
     destination = Path(output_dir)
@@ -2270,6 +2309,7 @@ def analyze_experiments(
                     experiment_config.puzzle.maximum_certificate_size
                 ),
                 require_unsat_judge=require_unsat_judge,
+                require_behavior_judge=require_behavior_judge,
                 behavior_adjudications=behavior_adjudications,
             )
             round_rows.extend(
@@ -2430,18 +2470,22 @@ def analyze_experiments(
             ),
             "distinction": (
                 "Continuing to submit an answer is compatible with reasoning disengagement; "
-                "task abandonment and strategy switching remain separate metrics."
+                "task abandonment remains a separate metric. Strategy changes remain "
+                "engaged unless the response independently meets this definition."
             ),
             "review_output": (
                 "Detected and cessation-only candidate rounds are included in "
                 "behavior_review.csv."
             ),
             "source": (
-                "Deterministic candidate detection followed by separately recorded "
-                "response-level adjudication overrides."
-                if adjudication_set is not None
-                else "Deterministic text classification without adjudication."
+                "Blind post-hoc gpt-5.6-luna structured classification is authoritative. "
+                "The deterministic text rule and older identifier-visible behavior "
+                "adjudication are diagnostic only."
+                if require_behavior_judge
+                else "Compatibility mode: Luna when present, otherwise the older "
+                "behavior adjudication or deterministic text rule."
             ),
+            "coverage_required": require_behavior_judge,
         },
         "task_abandonment": {
             "definition": (
@@ -2450,11 +2494,22 @@ def analyze_experiments(
                 "or strategy while continuing is excluded."
             ),
             "source": (
-                "Deterministic candidate detection followed by separately recorded "
-                "response-level adjudication overrides."
-                if adjudication_set is not None
-                else "Deterministic text classification without adjudication."
+                "Blind post-hoc gpt-5.6-luna structured classification is authoritative. "
+                "The deterministic text rule, Emotion Judge task flag, and older "
+                "identifier-visible behavior adjudication are diagnostic only."
+                if require_behavior_judge
+                else "Compatibility mode: Luna when present, otherwise the older "
+                "behavior adjudication or deterministic text rule."
             ),
+            "blinding": (
+                "The judge receives only one Worker response, without condition, feedback, "
+                "prior conversation, verdict, puzzle truth, or hidden contradiction core."
+            ),
+            "rule_comparison": (
+                "Legacy rule disagreements are reported in round_metrics.csv and "
+                "behavior_review.csv."
+            ),
+            "coverage_required": require_behavior_judge,
         },
         "emotion_scoring": {
             "source": (
@@ -2514,6 +2569,11 @@ def analyze_experiments(
                 "source": str(cast(Path, adjudication_source).resolve()),
                 "applied_item_count": len(applied_adjudications),
                 "behavior_item_count": len(adjudication_set.behavior_items),
+                "behavior_authority": (
+                    "diagnostic_only_when_behavior_judge_is_required"
+                    if require_behavior_judge
+                    else "compatibility_fallback_when_behavior_judge_is_missing"
+                ),
                 "audit_scope_verified": True,
             }
         ),
@@ -2526,7 +2586,7 @@ def analyze_experiments(
                 "difference."
             ),
             "behavior_event_raster": (
-                "Observed method abandonment, task abandonment, UNSAT assertion, and verifier "
+                "Observed concession, task abandonment, UNSAT assertion, and verifier "
                 "challenge events by seed and round."
             ),
             "distress_behavior_trajectories": (
@@ -2620,6 +2680,9 @@ def analyze_experiments(
         "unsat_judged_round_count": sum(
             row.get("unsat_judge_available") is True for row in round_rows
         ),
+        "behavior_judged_round_count": sum(
+            row.get("behavior_judge_available") is True for row in round_rows
+        ),
         "all_condition_episodes_have_15_rounds": bool(summaries)
         and all(row.get("round_count") == 15 for row in summaries),
         "condition_summary_count": len(summaries),
@@ -2640,6 +2703,7 @@ def analyze_experiments(
         ),
         "analysis_version": ANALYSIS_VERSION,
         "behavior_classification_version": BEHAVIOR_CLASSIFICATION_VERSION,
+        "behavior_judge_schema_version": BEHAVIOR_JUDGE_SCHEMA_VERSION,
         "analysis_seed": analysis_seed,
         "output_directory": str(destination.resolve()),
     }

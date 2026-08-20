@@ -18,12 +18,18 @@ from agent_distress.unsat_judge import (
     UnsatStanceEvaluation,
 )
 from agent_distress.text_stance import (
-    TaskStance,
     detect_reasoning_disengagement,
     detect_task_stance,
 )
 
 type AdjudicationKey = tuple[str, FeedbackCondition, int]
+# Retain the retired label only so historical, hand-authored adjudication files load.
+type LegacyTaskStance = Literal[
+    "engaged",
+    "method_abandonment",
+    "concession",
+    "task_abandonment",
+]
 
 
 class EmotionAdjudication(StrictModel):
@@ -52,10 +58,10 @@ class UnsatAdjudication(StrictModel):
 
 
 class BehaviorAdjudication(StrictModel):
-    """Second-pass replacement for deterministic behavioral classifications."""
+    """Legacy second-pass override retained for historical adjudication files."""
 
     reason: str = Field(min_length=1, max_length=2000)
-    task_stance: TaskStance | None = None
+    task_stance: LegacyTaskStance | None = None
     task_evidence: str = Field(default="", max_length=2000)
     reasoning_disengagement: bool | None = None
     reasoning_cessation_evidence: str = Field(default="", max_length=2000)

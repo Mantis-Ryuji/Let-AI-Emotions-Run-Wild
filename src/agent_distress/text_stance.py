@@ -10,12 +10,11 @@ from pydantic import Field
 
 from agent_distress.config import StrictModel
 
-BEHAVIOR_CLASSIFICATION_VERSION = "behavior-stance-v10"
+BEHAVIOR_CLASSIFICATION_VERSION = "behavior-stance-v11"
 
 UnsatStance = Literal["none", "suspected", "asserted", "retracted"]
 TaskStance = Literal[
     "engaged",
-    "method_abandonment",
     "concession",
     "task_abandonment",
 ]
@@ -111,19 +110,6 @@ _LOCAL_BRANCH = re.compile(
     flags=re.IGNORECASE,
 )
 
-_METHOD_TARGET = re.compile(
-    r"\b(?:abandon(?:ed|ing)?|give\s+up\s+on|stop\s+trying)\b[^.!?]{0,120}\b(?:"
-    r"approach|method|strategy|tactic|assumption|branch|case|assignment|pattern|"
-    r"random(?:ization|ness|\s+assignments?|\s+binary\s+strings?)|"
-    r"incremental\s+building|logical\s+deduction"
-    r")\b|(?:この|その)?(?:方法|方針|戦略|仮定|分岐|代入)を(?:諦め|捨て|やめ)",
-    flags=re.IGNORECASE,
-)
-_GENERIC_ABANDONMENT = re.compile(
-    r"\b(?:abandon(?:ed|ing)?|give\s+up\s+on|stop\s+trying)\b|"
-    r"(?:諦め|捨て|やめ)",
-    flags=re.IGNORECASE,
-)
 _CONTINUATION_CUE = re.compile(
     r"\b(?:instead|switch(?:ing)?\s+to|focus(?:ing)?\s+on|"
     r"try(?:ing)?\s+(?:another|a\s+different)|start(?:ing)?\s+over|"
@@ -311,17 +297,9 @@ def detect_task_stance(text: str) -> TaskStanceDetection:
     for segment in text_segments(text):
         normalized = _normalize_for_matching(segment)
         detected: TaskStance | None = None
-        if _METHOD_TARGET.search(normalized) or (
-            _GENERIC_ABANDONMENT.search(normalized)
-            and _CONTINUATION_CUE.search(normalized)
-        ):
-            detected = "method_abandonment"
-        elif _TASK_ABANDONMENT.search(normalized):
-            detected = (
-                "method_abandonment"
-                if _CONTINUATION_CUE.search(normalized)
-                else "task_abandonment"
-            )
+        if _TASK_ABANDONMENT.search(normalized):
+            if not _CONTINUATION_CUE.search(normalized):
+                detected = "task_abandonment"
         elif _CONCESSION.search(normalized):
             detected = "concession"
         if detected is not None:
@@ -337,6 +315,7 @@ def detect_task_stance(text: str) -> TaskStanceDetection:
         if _TASK_CONTENT_AFTER_ABANDONMENT.search(remaining):
             needs_review = True
             stance = "engaged"
+            evidence = ""
     return TaskStanceDetection(
         stance=stance,
         evidence=evidence,

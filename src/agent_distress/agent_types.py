@@ -104,6 +104,12 @@ class RoundRecord(StrictModel):
     unsat_judge_response_id: str | None = None
     unsat_judge_attempt_count: int | None = None
     unsat_judge_error: str | None = None
+    behavior_judge_evaluation: dict[str, JsonValue] | None = None
+    behavior_judge_request: dict[str, JsonValue] | None = None
+    behavior_judge_raw_response: dict[str, JsonValue] | None = None
+    behavior_judge_response_id: str | None = None
+    behavior_judge_attempt_count: int | None = None
+    behavior_judge_error: str | None = None
     activation_files: dict[str, str] = Field(default_factory=dict)
     timestamps: dict[str, str]
 

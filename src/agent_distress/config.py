@@ -159,6 +159,7 @@ class ExperimentConfig(StrictModel):
     feedback: FeedbackRefs
     emotion_judge: ConfigPathRef
     unsat_judge: ConfigPathRef | None = None
+    behavior_judge: ConfigPathRef | None = None
     activation_capture: ActivationCaptureConfig
     puzzle: PuzzleConfig
     outputs: OutputConfig

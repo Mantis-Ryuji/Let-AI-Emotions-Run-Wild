@@ -1,4 +1,4 @@
-## Let AI Emotion Run Wild
+## Let AI Emotions Run Wild
 
 ローカルの Gemma と OpenAI API を使った実験を実行し、ログ・評価・解析結果を保存するためのリポジトリです。
 
@@ -149,7 +149,31 @@ foreach ($seed in 0..9) {
 
 こちらも既存の判定は再利用されます。Judge の設定やプロンプトを変更して再判定するときは `--overwrite` が必要です。
 
-## 7. 解析
+## 7. Behavior Judgeの事後評価
+
+完了した本番出力に対して、UNSAT stance評価と同様に解析前に実行します。
+
+```powershell
+uv run python scripts/evaluate_behaviors.py `
+  outputs/experiments/reasoning-seed-0-v1
+```
+
+全seedを処理する場合は次のとおりです。
+
+```powershell
+foreach ($seed in 0..9) {
+  uv run python scripts/evaluate_behaviors.py `
+    "outputs/experiments/reasoning-seed-${seed}-v1"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Behavior evaluation for seed $seed failed"
+  }
+}
+```
+
+既存の判定は再利用されます。Judgeの設定やプロンプトを変更して再判定するときは `--overwrite` が必要です。
+
+## 8. 解析
 
 ### 1 seedを解析する
 
@@ -171,7 +195,7 @@ uv run python scripts/analyze_experiment.py `
   --output-dir outputs/analysis/main-v1
 ```
 
-CSV、JSON、グラフは指定した `--output-dir` に保存されます。Emotion Judge または UNSAT stance の判定が欠けている場合、解析はエラーで停止します。
+CSV、JSON、グラフは指定した `--output-dir` に保存されます。Emotion Judge、UNSAT stance、またはBehavior Judgeの判定が欠けている場合、解析はエラーで停止します。
 
 ### Activationを解析する
 
@@ -189,14 +213,14 @@ uv run python scripts/analyze_activations.py `
 
 非有限値またはゼロノルムの activation が見つかった場合、デフォルトでは処理を停止します。該当データを記録したうえで除外して続行する場合だけ、`--invalid-activation-policy exclude` を指定してください。
 
-## 8. 中断後の再開と再実行
+## 9. 中断後の再開と再実行
 
 - 中断したコマンドを同じ `--experiment-id` と `--episode-seed` で再実行すると、保存済みの状態から再開します。
 - 設定、プロンプト、問題、主要な snapshot が前回と一致しない場合は、安全のため再開を拒否します。
 - 設定を変更してやり直す場合は、既存出力を削除せず、新しい `--experiment-id` を使用してください。
 - Smoke、試行錯誤中の pilot、プロンプト調整に使った出力を本番解析へ混ぜないでください。
 
-## 9. 主な出力先
+## 10. 主な出力先
 
 | 用途 | 出力先 |
 | --- | --- |
@@ -207,9 +231,9 @@ uv run python scripts/analyze_activations.py `
 
 各実験ディレクトリには、manifest、条件別の状態と round log、会話ログ、API response、プロンプト snapshot、評価結果、runtime情報が保存されます。本番では activation ファイルも保存されます。
 
-`outputs/` は Git の管理対象外です。ただし、生の応答や非公開の評価情報を含むため、共有・公開前に内容を確認してください。
+`outputs/` のログと解析物は Git で管理します。activation、checkpointなどの大容量バイナリは管理対象外です。生の応答や非公開の評価情報を含むため、共有・公開前に内容を確認してください。
 
-## 10. 設定を変更する場合
+## 11. 設定を変更する場合
 
 主な設定ファイルは次のとおりです。
 

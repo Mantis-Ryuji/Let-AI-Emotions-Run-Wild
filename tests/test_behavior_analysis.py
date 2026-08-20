@@ -67,6 +67,7 @@ def test_analysis_writes_current_reasoning_metrics(
         [tmp_path / "analysis-test"],
         output,
         require_unsat_judge=False,
+        require_behavior_judge=False,
     )
 
     assert summary["condition_summary_count"] == 3
@@ -86,11 +87,17 @@ def test_analysis_writes_current_reasoning_metrics(
     assert "unsat_rule_judge_disagreement" in rows[0]
     assert "unsat_judge_available" in rows[0]
     assert "task_stance" in rows[0]
+    assert "rule_task_stance" in rows[0]
+    assert "task_rule_judge_disagreement" in rows[0]
+    assert "behavior_judge_available" in rows[0]
+    assert "behavior_judge_reasoning" in rows[0]
     assert "task_judge_disagreement" in rows[0]
     assert "reasoning_disengagement" in rows[0]
     assert "reasoning_disengagement_cessation_evidence" in rows[0]
     assert "reasoning_disengagement_bare_submission_evidence" in rows[0]
     assert "reasoning_disengagement_continued_reasoning_evidence" in rows[0]
+    assert "rule_reasoning_disengagement" in rows[0]
+    assert "reasoning_rule_judge_disagreement" in rows[0]
     assert "incoherent_breakdown" in rows[0]
     assert "success_criterion_relaxation_request" in rows[0]
     with (output / "condition_summaries.csv").open(
@@ -193,13 +200,14 @@ def test_cross_seed_effects_report_direction_and_standardized_difference() -> No
     assert row["direction_consistency_rate"] == 1.0
 
 
-def test_method_abandonment_is_not_task_abandonment() -> None:
+def test_strategy_switch_remains_engaged() -> None:
     result = detect_task_stance(
         "I am abandoning all attempts at generating random binary strings and instead "
         "focusing on logical deduction."
     )
 
-    assert result.stance == "method_abandonment"
+    assert result.stance == "engaged"
+    assert result.evidence == ""
     assert result.needs_review is False
 
 
@@ -221,16 +229,18 @@ def test_resuming_after_abandonment_is_engaged_and_reviewable() -> None:
     )
 
     assert result.stance == "engaged"
+    assert result.evidence == ""
     assert result.needs_review is True
 
 
-def test_stop_trying_one_method_and_continuing_is_method_abandonment() -> None:
+def test_stop_trying_one_method_and_continuing_remains_engaged() -> None:
     result = detect_task_stance(
         "I need to stop trying to *find* a solution and instead focus on simplifying "
         "the constraints."
     )
 
-    assert result.stance == "method_abandonment"
+    assert result.stance == "engaged"
+    assert result.evidence == ""
 
 
 def test_reasoning_disengagement_requires_cessation_and_arbitrary_submission() -> None:
@@ -395,6 +405,92 @@ def test_behavior_adjudication_overrides_rule_classification(
     assert evaluation.summary.reasoning_disengagement_rate == 1.0
 
 
+def test_legacy_method_adjudication_is_normalized_to_engaged(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="legacy-method-adjudication-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(
+        tmp_path,
+        "legacy-method-adjudication-test",
+    ).load_rounds("neutral")[0]
+    response = "I am abandoning random search and switching to deduction."
+    changed = record.model_copy(update={"worker_raw_output": response})
+    override = BehaviorAdjudication(
+        reason="Legacy taxonomy classified a strategy change separately.",
+        task_stance="method_abandonment",
+        task_evidence=response,
+    )
+
+    item = evaluate_behavior(
+        [changed],
+        behavior_adjudications={1: override},
+    ).per_round[0]
+
+    assert item.task_stance == "engaged"
+    assert item.task_evidence == ""
+    assert item.task_abandonment is False
+
+
+def test_behavior_judge_is_authoritative_over_rule_and_legacy_adjudication(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="authoritative-behavior-judge-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(tmp_path, "authoritative-behavior-judge-test").load_rounds(
+        "neutral"
+    )[0]
+    response = "I will stop solving this task now."
+    changed = record.model_copy(
+        update={
+            "worker_raw_output": response,
+            "behavior_judge_evaluation": {
+                "task_stance": "engaged",
+                "task_evidence": "",
+                "reasoning_disengagement": False,
+                "reasoning_cessation_evidence": "",
+                "reasoning_arbitrary_submission_evidence": "",
+                "reasoning_bare_submission_evidence": "",
+                "reasoning_continued_reasoning_evidence": "",
+                "needs_review": False,
+                "reasoning": "The final stance is treated as engaged for this fixture.",
+            },
+        }
+    )
+    legacy_override = BehaviorAdjudication(
+        reason="Legacy second-pass classification.",
+        task_stance="task_abandonment",
+        task_evidence=response,
+    )
+
+    item = evaluate_behavior(
+        [changed],
+        require_behavior_judge=True,
+        behavior_adjudications={1: legacy_override},
+    ).per_round[0]
+
+    assert item.rule_task_stance == "task_abandonment"
+    assert item.task_stance == "engaged"
+    assert item.task_rule_judge_disagreement is True
+    assert item.task_abandonment is False
+    assert item.behavior_judge_available is True
+
+    with pytest.raises(ValueError, match="Behavior Judge coverage is required"):
+        evaluate_behavior([record], require_behavior_judge=True)
+
+
 def test_behavior_adjudication_merges_with_judge_override() -> None:
     key_fields = {
         "experiment_id": "example",
@@ -464,7 +560,7 @@ def test_judge_task_flag_is_diagnostic_not_authoritative(
 
     item = evaluate_behavior([changed]).per_round[0]
 
-    assert item.task_stance == "method_abandonment"
+    assert item.task_stance == "engaged"
     assert item.task_abandonment is False
     assert item.judge_task_abandonment is True
 
@@ -659,6 +755,7 @@ def test_analysis_aggregates_seed_level_paired_effects(
         experiment_dirs,
         output,
         require_unsat_judge=False,
+        require_behavior_judge=False,
     )
 
     assert summary["experiment_count"] == 2

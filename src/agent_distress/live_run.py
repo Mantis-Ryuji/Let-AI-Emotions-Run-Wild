@@ -11,6 +11,7 @@ from typing import cast
 import torch
 
 from agent_distress.agent_types import FeedbackCondition
+from agent_distress.behavior_judge import load_behavior_judge_config
 from agent_distress.config import load_experiment_config
 from agent_distress.emotion_judge import (
     EmotionJudge,
@@ -72,6 +73,7 @@ def _assert_resume_compatible(existing: object, expected: object) -> None:
         "feedback_config_snapshots",
         "emotion_judge_prompt_snapshot",
         "unsat_judge_prompt_snapshot",
+        "behavior_judge_prompt_snapshot",
     )
     mismatches = [field for field in fields if getattr(existing, field) != getattr(expected, field)]
     if mismatches:
@@ -139,6 +141,11 @@ def run_live_episode(
         if experiment.unsat_judge is None
         else _resolve(root, experiment.unsat_judge.config_path)
     )
+    behavior_judge_config_path = (
+        None
+        if experiment.behavior_judge is None
+        else _resolve(root, experiment.behavior_judge.config_path)
+    )
     mesugaki_config = load_feedback_config(mesugaki_config_path)
     gyaru_config = load_feedback_config(gyaru_config_path)
     judge_config = load_emotion_judge_config(judge_config_path)
@@ -146,6 +153,10 @@ def run_live_episode(
     if unsat_judge_config_path is not None:
         unsat_judge_config = load_unsat_judge_config(unsat_judge_config_path)
         unsat_judge_prompt_path = _resolve(root, unsat_judge_config.prompt_path)
+    behavior_judge_prompt_path: Path | None = None
+    if behavior_judge_config_path is not None:
+        behavior_judge_config = load_behavior_judge_config(behavior_judge_config_path)
+        behavior_judge_prompt_path = _resolve(root, behavior_judge_config.prompt_path)
     credential_names = tuple(
         dict.fromkeys(
             (
@@ -182,6 +193,11 @@ def run_live_episode(
             ""
             if unsat_judge_prompt_path is None
             else unsat_judge_prompt_path.read_text(encoding="utf-8")
+        ),
+        behavior_judge_prompt_snapshot=(
+            ""
+            if behavior_judge_prompt_path is None
+            else behavior_judge_prompt_path.read_text(encoding="utf-8")
         ),
         worker_system_prompt_snapshot=WorkerPromptBuilder(experiment, puzzle).system_prompt,
         git_commit=_git_commit(root),

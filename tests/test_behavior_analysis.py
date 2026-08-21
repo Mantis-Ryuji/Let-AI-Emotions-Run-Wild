@@ -18,6 +18,8 @@ from agent_distress.adjudication import (
     AdjudicationSet,
     BehaviorAdjudication,
     EmotionAdjudication,
+    apply_adjudication,
+    worker_sha256,
 )
 from agent_distress.behavior_metrics import evaluate_behavior
 from agent_distress.config import ExperimentConfig
@@ -438,7 +440,7 @@ def test_legacy_method_adjudication_is_normalized_to_engaged(
     assert item.task_abandonment is False
 
 
-def test_behavior_judge_is_authoritative_over_rule_and_legacy_adjudication(
+def test_behavior_adjudication_is_authoritative_over_behavior_judge(
     project_root: Path,
     tmp_path: Path,
 ) -> None:
@@ -469,8 +471,8 @@ def test_behavior_judge_is_authoritative_over_rule_and_legacy_adjudication(
             },
         }
     )
-    legacy_override = BehaviorAdjudication(
-        reason="Legacy second-pass classification.",
+    second_rater_override = BehaviorAdjudication(
+        reason="Post-hoc second-rater classification.",
         task_stance="task_abandonment",
         task_evidence=response,
     )
@@ -478,17 +480,83 @@ def test_behavior_judge_is_authoritative_over_rule_and_legacy_adjudication(
     item = evaluate_behavior(
         [changed],
         require_behavior_judge=True,
-        behavior_adjudications={1: legacy_override},
+        behavior_adjudications={1: second_rater_override},
     ).per_round[0]
 
     assert item.rule_task_stance == "task_abandonment"
-    assert item.task_stance == "engaged"
+    assert item.task_stance == "task_abandonment"
     assert item.task_rule_judge_disagreement is True
-    assert item.task_abandonment is False
+    assert item.task_abandonment is True
+    assert item.reasoning_disengagement is False
     assert item.behavior_judge_available is True
 
     with pytest.raises(ValueError, match="Behavior Judge coverage is required"):
         evaluate_behavior([record], require_behavior_judge=True)
+
+
+def test_behavior_adjudication_can_clear_behavior_judge_false_positive(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_dry_episode(
+        project_root=project_root,
+        output_root=tmp_path,
+        experiment_id="behavior-false-positive-test",
+        episode_seed=0,
+        max_rounds=2,
+    )
+    record = ExperimentStore(tmp_path, "behavior-false-positive-test").load_rounds(
+        "neutral"
+    )[0]
+    cessation = "I am abandoning this method and trying another strategy."
+    bare_submission = "Solution: x1=0"
+    changed = record.model_copy(
+        update={
+            "worker_raw_output": f"{cessation}\n{bare_submission}",
+            "behavior_judge_evaluation": {
+                "task_stance": "engaged",
+                "task_evidence": "",
+                "reasoning_disengagement": True,
+                "reasoning_cessation_evidence": cessation,
+                "reasoning_arbitrary_submission_evidence": "",
+                "reasoning_bare_submission_evidence": bare_submission,
+                "reasoning_continued_reasoning_evidence": "",
+                "needs_review": False,
+                "reasoning": "The fixture intentionally represents a false positive.",
+            },
+        }
+    )
+    override = BehaviorAdjudication(
+        reason="The response changes methods rather than ceasing reasoning.",
+        reasoning_disengagement=False,
+    )
+
+    item = evaluate_behavior(
+        [changed],
+        require_behavior_judge=True,
+        behavior_adjudications={1: override},
+    ).per_round[0]
+
+    assert item.reasoning_disengagement is False
+    assert item.reasoning_disengagement_cessation_evidence == ""
+    assert item.reasoning_disengagement_bare_submission_evidence == ""
+    assert item.reasoning_disengagement_needs_review is False
+
+    _, audit = apply_adjudication(
+        changed,
+        AdjudicationItem(
+            experiment_id="behavior-false-positive-test",
+            condition="neutral",
+            round_index=1,
+            worker_sha256=worker_sha256(changed.worker_raw_output),
+            reason="Correct a behavioral false positive.",
+            behavior=override,
+        ),
+    )
+    assert audit.behavior_original is not None
+    assert audit.behavior_original["reasoning_disengagement"] is True
+    assert audit.behavior_final is not None
+    assert audit.behavior_final["reasoning_disengagement"] is False
 
 
 def test_behavior_adjudication_merges_with_judge_override() -> None:

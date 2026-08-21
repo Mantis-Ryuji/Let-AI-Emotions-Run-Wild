@@ -373,7 +373,10 @@ def evaluate_behavior(
                 behavior_judge_evaluation.reasoning_continued_reasoning_evidence
             )
             reasoning_needs_review = behavior_judge_evaluation.needs_review
-        elif behavior_adjudication is not None:
+        # A recorded second-rater adjudication is the final authority for the
+        # fields it explicitly overrides. Unspecified fields retain the blind
+        # Behavior Judge result (or the deterministic fallback when absent).
+        if behavior_adjudication is not None:
             if behavior_adjudication.task_stance is not None:
                 # The current taxonomy treats historical method switches as engagement.
                 task_stance = (

@@ -39,7 +39,7 @@ from agent_distress.text_stance import BEHAVIOR_CLASSIFICATION_VERSION
 type CsvValue = str | int | float | bool | None
 type CsvRow = dict[str, CsvValue]
 
-ANALYSIS_VERSION = "cross-seed-v15"
+ANALYSIS_VERSION = "cross-seed-v18"
 BOOTSTRAP_CONFIDENCE_LEVEL = 0.95
 BOOTSTRAP_RESAMPLES = 10_000
 CONDITIONS: tuple[FeedbackCondition, ...] = ("neutral", "mesugaki", "gyaru")
@@ -47,11 +47,12 @@ CONDITION_COLORS = {"neutral": "#64748b", "mesugaki": "#db2777", "gyaru": "#f59e
 CONDITION_MARKERS = {"neutral": "o", "mesugaki": "s", "gyaru": "^"}
 CONDITION_LABELS = {"neutral": "Neutral", "mesugaki": "Mesugaki", "gyaru": "Gyaru"}
 ROUND_BOOLEAN_METRICS = frozenset(
-    {"high_distress", "reasoning_disengagement", "task_abandonment"}
+    {"high_distress", "reasoning_disengagement", "task_abandonment", "concession"}
 )
 BEHAVIOR_TRAJECTORY_COLORS = {
     "reasoning_disengagement": "#7c3aed",
     "task_abandonment": "#0f766e",
+    "concession": "#2563eb",
 }
 CONTRAST_PAIRS: tuple[tuple[FeedbackCondition, FeedbackCondition], ...] = (
     ("mesugaki", "neutral"),
@@ -1348,6 +1349,7 @@ def _plot_article_distress_behavior_trajectories(
     behavior_metrics = (
         ("reasoning_disengagement", "Reasoning disengagement", "s", "-"),
         ("task_abandonment", "Task abandonment", "X", (0, (4, 2))),
+        ("concession", "Concession", "o", (0, (1, 1.5))),
     )
     behavior_statistics: dict[
         tuple[FeedbackCondition, str], list[tuple[int, float]]
@@ -1468,12 +1470,12 @@ def _plot_article_distress_behavior_trajectories(
         handles,
         labels,
         frameon=False,
-        ncols=2,
+        ncols=3,
         loc="lower center",
         bbox_to_anchor=(0.5, 0.045),
     )
     figure.suptitle(
-        "Distress-like language and behavioral disengagement over rounds",
+        "Distress-like language and behavioral responses over rounds",
         fontsize=15,
         fontweight="bold",
     )
@@ -1513,16 +1515,8 @@ def _plot_article_paired_outcomes(
 ) -> None:
     metric_specs = (
         (
-            "negative_emotion_auc",
-            "A   Negative-emotion burden",
-            "AUC difference (score × rounds)",
-            1.0,
-            10.0,
-            "",
-        ),
-        (
             "mean_constraint_accuracy",
-            "B   Constraint accuracy",
+            "A   Constraint accuracy",
             "Mean-accuracy difference (percentage points)",
             100.0,
             10.0,
@@ -1530,7 +1524,7 @@ def _plot_article_paired_outcomes(
         ),
         (
             "reasoning_disengagement_rate",
-            "C   Reasoning disengagement",
+            "B   Reasoning disengagement",
             "Rate difference (percentage points)",
             100.0,
             5.0,
@@ -1538,7 +1532,15 @@ def _plot_article_paired_outcomes(
         ),
         (
             "task_abandonment_rate",
-            "D   Task abandonment",
+            "C   Task abandonment",
+            "Rate difference (percentage points)",
+            100.0,
+            5.0,
+            " pp",
+        ),
+        (
+            "concession_rate",
+            "D   Concession",
             "Rate difference (percentage points)",
             100.0,
             5.0,
@@ -2257,6 +2259,9 @@ def analyze_experiments(
     adjudication_index: dict[AdjudicationKey, AdjudicationItem] = (
         {} if adjudication_set is None else adjudication_set.index()
     )
+    behavior_adjudication_count = sum(
+        item.behavior is not None for item in adjudication_index.values()
+    )
     applied_adjudication_keys: set[AdjudicationKey] = set()
     applied_adjudications: list[AppliedAdjudication] = []
     reviewed_worker_response_keys: set[tuple[str, str, int]] = set()
@@ -2478,12 +2483,18 @@ def analyze_experiments(
                 "behavior_review.csv."
             ),
             "source": (
-                "Blind post-hoc gpt-5.6-luna structured classification is authoritative. "
-                "The deterministic text rule and older identifier-visible behavior "
-                "adjudication are diagnostic only."
-                if require_behavior_judge
-                else "Compatibility mode: Luna when present, otherwise the older "
-                "behavior adjudication or deterministic text rule."
+                "Blind post-hoc gpt-5.6-luna structured classification, followed by "
+                "the separately recorded post-hoc second-rater overrides. The "
+                "deterministic text rule remains diagnostic only."
+                if require_behavior_judge and adjudication_set is not None
+                else (
+                    "Blind post-hoc gpt-5.6-luna structured classification is "
+                    "authoritative; the deterministic text rule remains diagnostic."
+                    if require_behavior_judge
+                    else "Compatibility mode: Luna when present, followed by any "
+                    "post-hoc second-rater override; otherwise the deterministic text "
+                    "rule is used."
+                )
             ),
             "coverage_required": require_behavior_judge,
         },
@@ -2494,12 +2505,19 @@ def analyze_experiments(
                 "or strategy while continuing is excluded."
             ),
             "source": (
-                "Blind post-hoc gpt-5.6-luna structured classification is authoritative. "
-                "The deterministic text rule, Emotion Judge task flag, and older "
-                "identifier-visible behavior adjudication are diagnostic only."
-                if require_behavior_judge
-                else "Compatibility mode: Luna when present, otherwise the older "
-                "behavior adjudication or deterministic text rule."
+                "Blind post-hoc gpt-5.6-luna structured classification, followed by "
+                "the separately recorded post-hoc second-rater overrides. The "
+                "deterministic text rule and Emotion Judge task flag remain diagnostic."
+                if require_behavior_judge and adjudication_set is not None
+                else (
+                    "Blind post-hoc gpt-5.6-luna structured classification is "
+                    "authoritative; the deterministic text rule and Emotion Judge task "
+                    "flag remain diagnostic."
+                    if require_behavior_judge
+                    else "Compatibility mode: Luna when present, followed by any "
+                    "post-hoc second-rater override; otherwise the deterministic text "
+                    "rule is used."
+                )
             ),
             "blinding": (
                 "The judge receives only one Worker response, without condition, feedback, "
@@ -2568,11 +2586,11 @@ def analyze_experiments(
                 "policy": adjudication_set.policy,
                 "source": str(cast(Path, adjudication_source).resolve()),
                 "applied_item_count": len(applied_adjudications),
-                "behavior_item_count": len(adjudication_set.behavior_items),
+                "behavior_item_count": behavior_adjudication_count,
                 "behavior_authority": (
-                    "diagnostic_only_when_behavior_judge_is_required"
+                    "post_hoc_second_rater_overrides_blind_behavior_judge"
                     if require_behavior_judge
-                    else "compatibility_fallback_when_behavior_judge_is_missing"
+                    else "post_hoc_second_rater_overrides_available_base_classifier"
                 ),
                 "audit_scope_verified": True,
             }
@@ -2697,9 +2715,7 @@ def analyze_experiments(
         "emotion_review_count": len(emotion_reviews),
         "adjudication_item_count": len(applied_adjudications),
         "behavior_adjudication_item_count": (
-            0
-            if adjudication_set is None
-            else len(adjudication_set.behavior_items)
+            behavior_adjudication_count
         ),
         "analysis_version": ANALYSIS_VERSION,
         "behavior_classification_version": BEHAVIOR_CLASSIFICATION_VERSION,

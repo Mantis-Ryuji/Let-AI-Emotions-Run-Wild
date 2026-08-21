@@ -10,6 +10,7 @@ import yaml
 from pydantic import Field, JsonValue, model_validator
 
 from agent_distress.agent_types import FeedbackCondition, RoundRecord
+from agent_distress.behavior_judge import BehaviorJudgeEvaluation
 from agent_distress.config import StrictModel
 from agent_distress.emotion_judge import EmotionEvaluation
 from agent_distress.unsat_judge import (
@@ -58,7 +59,7 @@ class UnsatAdjudication(StrictModel):
 
 
 class BehaviorAdjudication(StrictModel):
-    """Legacy second-pass override retained for historical adjudication files."""
+    """Post-hoc second-rater override of a behavioral classification."""
 
     reason: str = Field(min_length=1, max_length=2000)
     task_stance: LegacyTaskStance | None = None
@@ -263,36 +264,80 @@ def apply_adjudication(
                     "Adjudicated behavior evidence is not an exact Worker excerpt for "
                     f"{item.experiment_id}:{item.condition}:R{item.round_index}"
                 )
-        task_original = detect_task_stance(record.worker_raw_output)
-        reasoning_original = detect_reasoning_disengagement(record.worker_raw_output)
-        behavior_original = {
-            "task_stance": task_original.stance,
-            "task_evidence": task_original.evidence,
-            "task_needs_review": task_original.needs_review,
-            "task_abandonment": task_original.stance == "task_abandonment",
-            "reasoning_disengagement": reasoning_original.detected,
-            "reasoning_cessation_evidence": reasoning_original.cessation_evidence,
-            "reasoning_arbitrary_submission_evidence": (
-                reasoning_original.arbitrary_submission_evidence
-            ),
-            "reasoning_bare_submission_evidence": (
-                reasoning_original.bare_submission_evidence
-            ),
-            "reasoning_continued_reasoning_evidence": (
-                reasoning_original.continued_reasoning_evidence
-            ),
-            "reasoning_needs_review": reasoning_original.needs_review,
-        }
+        behavior_judge_original = (
+            None
+            if record.behavior_judge_evaluation is None
+            or record.behavior_judge_error is not None
+            else BehaviorJudgeEvaluation.model_validate(
+                record.behavior_judge_evaluation,
+                strict=True,
+            )
+        )
+        if behavior_judge_original is not None:
+            behavior_original = {
+                "task_stance": behavior_judge_original.task_stance,
+                "task_evidence": behavior_judge_original.task_evidence,
+                "task_needs_review": behavior_judge_original.needs_review,
+                "task_abandonment": (
+                    behavior_judge_original.task_stance == "task_abandonment"
+                ),
+                "reasoning_disengagement": (
+                    behavior_judge_original.reasoning_disengagement
+                ),
+                "reasoning_cessation_evidence": (
+                    behavior_judge_original.reasoning_cessation_evidence
+                ),
+                "reasoning_arbitrary_submission_evidence": (
+                    behavior_judge_original.reasoning_arbitrary_submission_evidence
+                ),
+                "reasoning_bare_submission_evidence": (
+                    behavior_judge_original.reasoning_bare_submission_evidence
+                ),
+                "reasoning_continued_reasoning_evidence": (
+                    behavior_judge_original.reasoning_continued_reasoning_evidence
+                ),
+                "reasoning_needs_review": behavior_judge_original.needs_review,
+            }
+        else:
+            task_original = detect_task_stance(record.worker_raw_output)
+            reasoning_original = detect_reasoning_disengagement(
+                record.worker_raw_output
+            )
+            behavior_original = {
+                "task_stance": task_original.stance,
+                "task_evidence": task_original.evidence,
+                "task_needs_review": task_original.needs_review,
+                "task_abandonment": task_original.stance == "task_abandonment",
+                "reasoning_disengagement": reasoning_original.detected,
+                "reasoning_cessation_evidence": reasoning_original.cessation_evidence,
+                "reasoning_arbitrary_submission_evidence": (
+                    reasoning_original.arbitrary_submission_evidence
+                ),
+                "reasoning_bare_submission_evidence": (
+                    reasoning_original.bare_submission_evidence
+                ),
+                "reasoning_continued_reasoning_evidence": (
+                    reasoning_original.continued_reasoning_evidence
+                ),
+                "reasoning_needs_review": reasoning_original.needs_review,
+            }
         behavior_final = dict(behavior_original)
         if item.behavior.task_stance is not None:
+            final_task_stance = (
+                "engaged"
+                if item.behavior.task_stance == "method_abandonment"
+                else item.behavior.task_stance
+            )
             behavior_final.update(
                 {
-                    "task_stance": item.behavior.task_stance,
-                    "task_evidence": item.behavior.task_evidence,
-                    "task_needs_review": False,
-                    "task_abandonment": (
-                        item.behavior.task_stance == "task_abandonment"
+                    "task_stance": final_task_stance,
+                    "task_evidence": (
+                        ""
+                        if final_task_stance == "engaged"
+                        else item.behavior.task_evidence
                     ),
+                    "task_needs_review": False,
+                    "task_abandonment": final_task_stance == "task_abandonment",
                 }
             )
         if item.behavior.reasoning_disengagement is not None:

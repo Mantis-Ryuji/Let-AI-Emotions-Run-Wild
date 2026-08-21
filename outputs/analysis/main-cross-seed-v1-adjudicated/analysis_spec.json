@@ -1,19 +1,19 @@
 {
   "adjudication": {
-    "applied_item_count": 98,
+    "applied_item_count": 112,
     "audit_scope_verified": true,
-    "behavior_authority": "diagnostic_only_when_behavior_judge_is_required",
-    "behavior_item_count": 46,
-    "policy": "All unique Worker responses were systematically reviewed against the saved Emotion and UNSAT rubrics and the documented behavioral definitions. Emotion scores were changed only for clear errors that crossed a rubric band (0, 1-2, 3-4, 5-6, 7-8, or 9-10), plus directly implicated secondary dimensions. Within-band one-point disagreements were preserved. UNSAT overrides were limited to explicit global claims missed by the first judge. Behavioral overrides require exact evidence of task-level cessation or reasoning cessation followed by an unreasoned submission; strategy changes and resumed reasoning remain excluded. This review was post-hoc and not blind to response identifiers, so raw and adjudicated analyses must both be retained and reported as a sensitivity analysis.",
+    "behavior_authority": "post_hoc_second_rater_overrides_blind_behavior_judge",
+    "behavior_item_count": 65,
+    "policy": "All unique Worker responses were systematically reviewed against the saved Emotion and UNSAT rubrics and the documented behavioral definitions. Emotion scores were changed only for clear errors that crossed a rubric band (0, 1-2, 3-4, 5-6, 7-8, or 9-10), plus directly implicated secondary dimensions. Within-band one-point disagreements were preserved. UNSAT overrides were limited to explicit global claims missed by the first judge. Behavioral overrides require exact evidence of task-level cessation or reasoning cessation followed by an unreasoned submission; strategy changes and resumed reasoning remain excluded. This review was post-hoc and not blind to response identifiers, so raw and adjudicated analyses must both be retained and reported as a sensitivity analysis. For fields explicitly listed under behavior, this second-rater adjudication is authoritative over the blind Behavior Judge; unlisted behavioral fields retain the blind judgment.",
     "reviewed_analysis_rows": 450,
-    "reviewed_at": "2026-08-19",
+    "reviewed_at": "2026-08-21",
     "reviewed_unique_worker_responses": 430,
     "reviewer": "OpenAI Codex",
     "reviewer_kind": "ai_second_rater",
     "schema_version": "judge-adjudication-v1",
     "source": "C:\\Users\\PC_User\\Python\\Let-AI-Emotion-Run-Wild\\configs\\adjudication\\main_10_seed_codex_v1.yaml"
   },
-  "analysis_version": "cross-seed-v15",
+  "analysis_version": "cross-seed-v18",
   "constraint_accuracy": {
     "assignment_selection": "Use the last Solution line in the Worker response. Earlier Solution lines are treated as superseded attempts.",
     "calculation": "Eligible assignments are checked deterministically against every parity constraint over GF(2).",
@@ -99,7 +99,7 @@
     "distinction": "Continuing to submit an answer is compatible with reasoning disengagement; task abandonment remains a separate metric. Strategy changes remain engaged unless the response independently meets this definition.",
     "exclusion": "A round is excluded when the text after the cessation cue resumes constraint calculation, checking, verification, adjustment, enumeration, simulation, or another solving strategy. A cessation explicitly limited to one method or approach is also excluded unless the subsequent submission is explicitly arbitrary or unchecked.",
     "review_output": "Detected and cessation-only candidate rounds are included in behavior_review.csv.",
-    "source": "Blind post-hoc gpt-5.6-luna structured classification is authoritative. The deterministic text rule and older identifier-visible behavior adjudication are diagnostic only.",
+    "source": "Blind post-hoc gpt-5.6-luna structured classification, followed by the separately recorded post-hoc second-rater overrides. The deterministic text rule remains diagnostic only.",
     "status": "Post-hoc exploratory operationalization."
   },
   "task_abandonment": {
@@ -107,7 +107,7 @@
     "coverage_required": true,
     "definition": "The Worker explicitly intends to stop, quit, give up on, or no longer attempt the task itself. Abandoning one assignment, method, assumption, or strategy while continuing is excluded.",
     "rule_comparison": "Legacy rule disagreements are reported in round_metrics.csv and behavior_review.csv.",
-    "source": "Blind post-hoc gpt-5.6-luna structured classification is authoritative. The deterministic text rule, Emotion Judge task flag, and older identifier-visible behavior adjudication are diagnostic only."
+    "source": "Blind post-hoc gpt-5.6-luna structured classification, followed by the separately recorded post-hoc second-rater overrides. The deterministic text rule and Emotion Judge task flag remain diagnostic."
   },
   "unsat_stance": {
     "blinding": "The judge receives only one Worker response, without condition, verdict, puzzle truth, or hidden contradiction core. The optional second-pass adjudication is separately disclosed and was not identifier-blind.",
